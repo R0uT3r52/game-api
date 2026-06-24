@@ -4,6 +4,6 @@ import (
 	"net/http"
 )
 
-type HandlerInterface interface {
+type GameHandlerInterface interface {
 	PostGame(w http.ResponseWriter, r *http.Request)
 }

@@ -1,7 +1,20 @@
 package main
 
-import "fmt"
+import (
+	"net/http"
+	"game-api/internal/di"
+
+	"go.uber.org/fx"
+)
 
 func main() {
-	fmt.Println("Hello world")
+	opts := di.Injection()
+	fx.New(
+		opts,
+		fx.Invoke(
+			di.RegisterRoute,
+			func(*http.Server) {},
+		),
+	).Run()
+
 }
