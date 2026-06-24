@@ -3,10 +3,19 @@ package datasource
 import (
 	"fmt"
 	"game-api/internal/domain"
+	"sync"
 )
 
 func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("not found error: %s\n", e.Message)
+}
+
+func NewGameRepo() *GameRepository {
+	return &GameRepository{
+		Data: &Storage{
+			Games: sync.Map{},
+		},
+	}
 }
 
 func (r *GameRepository) Save(game *domain.Session) error {

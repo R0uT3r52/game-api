@@ -26,7 +26,8 @@ func (g *GameService) ValidateField(uuid string, newField Field) error {
 	s, err := g.repo.Load(uuid)
 
 	if err != nil {
-		return &GameNotFoundError{UUID: uuid}
+		s = &Session{UUID: uuid}
+		g.repo.Save(s)
 	}
 
 	changes := 0
@@ -49,31 +50,6 @@ func (g *GameService) ValidateField(uuid string, newField Field) error {
 		return &ValidationError{Message: "player must change only one cell"}
 	}
 
-	for i := range newField.Grid {
-		for j := range newField.Grid {
-			if s.F.Grid[i][j] == g.BotSign && newField.Grid[i][j] == g.PlayerSign {
-				return &ValidationError{Message: "player cannot overwrite cell"}
-			}
-
-			if s.F.Grid[i][j] == Empty && newField.Grid[i][j] == g.BotSign {
-				return &ValidationError{Message: "player cannot overwrite cell as BotSign"}
-			}
-
-			if s.F.Grid[i][j] == g.BotSign && newField.Grid[i][j] == Empty {
-				return &ValidationError{Message: "player cannot overwrite cell"}
-			}
-
-			if s.F.Grid[i][j] == g.PlayerSign && newField.Grid[i][j] == Empty {
-				return &ValidationError{Message: "player cannot overwrite cell"}
-			}
-
-			if s.F.Grid[i][j] == g.PlayerSign && newField.Grid[i][j] == g.BotSign {
-				return &ValidationError{Message: "player cannot overwrite cell"}
-			}
-
-		}
-	}
-
 	s.F = newField
 
 	err = g.repo.Save(s)
@@ -92,6 +68,9 @@ func (g *GameService) MakeAiMove(uuid string) (*Session, error) {
 	}
 
 	r, c := g.getNextMove(&s.F)
+	if r == -1 || c == -1 {
+		return nil, &ValidationError{Message: "error"}
+	}
 
 	s.F.Grid[r][c] = g.BotSign
 
