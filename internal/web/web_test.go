@@ -55,7 +55,7 @@ func TestConcurrent(t *testing.T) {
 			resp, _ := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
 
 			if resp.StatusCode != http.StatusOK {
-				t.Errorf("Expected not 200 OK status")
+				t.Errorf("Expected 200 OK status")
 			}
 			defer resp.Body.Close()
 		}(i)
@@ -63,27 +63,25 @@ func TestConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestAIvsAI(t *testing.T) {
-	ts := createTestServer()
-	defer ts.Close()
+func aiVSai(ts *httptest.Server, t *testing.T, uuid string) {
+	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
 
 	clientRepo := datasource.NewGameRepo()
 	clientSvc := domain.NewGameService(clientRepo, domain.Nought, domain.Cross)
-
-	uuid := "test"
-	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
 
 	currentField := domain.Field{}
 
 	for i := 0; i < 10; i++ {
 		err := clientRepo.Save(&domain.Session{UUID: uuid, F: currentField})
 		if err != nil {
-			t.Fatalf("Failed to save to client repo: %v", err)
+			t.Errorf("[UUID: %s] Failed to save to client repo: %v", uuid, err)
+			return
 		}
 
 		updatedSession, err := clientSvc.MakeAiMove(uuid)
 		if err != nil {
-			t.Fatalf("Client AI failed to make move: %v", err)
+			t.Errorf("[UUID: %s] Client AI failed to make move: %v", uuid, err)
+			return
 		}
 
 		reqBody, _ := json.Marshal(GameModel{
@@ -93,26 +91,29 @@ func TestAIvsAI(t *testing.T) {
 
 		resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
 		if err != nil {
-			t.Fatalf("Failed to post game: %v", err)
+			t.Errorf("[UUID: %s] Failed to post game: %v", uuid, err)
+			return
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			buf := new(bytes.Buffer)
 			buf.ReadFrom(resp.Body)
 			resp.Body.Close()
-			t.Fatalf("Expected status 200, got %v. Response: %s", resp.StatusCode, buf.String())
+			t.Errorf("[UUID: %s] Expected status 200, got %v. Response: %s", uuid, resp.StatusCode, buf.String())
+			return
 		}
 
 		var gameResp GameModel
 		if err := json.NewDecoder(resp.Body).Decode(&gameResp); err != nil {
 			resp.Body.Close()
-			t.Fatalf("Failed to decode response: %v", err)
+			t.Errorf("[UUID: %s] Failed to decode response: %v", uuid, err)
+			return
 		}
 		resp.Body.Close()
 
 		if gameResp.Winner != nil {
 			if *gameResp.Winner != domain.Tie {
-				t.Errorf("Tie expected between two AI. Winner: %v", *gameResp.Winner)
+				t.Errorf("[UUID: %s] Tie expected between two AI. Winner: %v", uuid, *gameResp.Winner)
 			}
 			return // Game ended correctly
 		}
@@ -121,5 +122,34 @@ func TestAIvsAI(t *testing.T) {
 		currentField.Grid = gameResp.Field
 	}
 
-	t.Errorf("game not ended correctly")
+	t.Errorf("[UUID: %s] game not ended correctly", uuid)
+
+}
+
+func TestAIvsAI(t *testing.T) {
+	ts := createTestServer()
+	defer ts.Close()
+
+	uuid := "test"
+
+	aiVSai(ts, t, uuid)
+}
+
+func TestConcurrentAIvsAI(t *testing.T) {
+	ts := createTestServer()
+	defer ts.Close()
+	var wg sync.WaitGroup
+	gamesCount := 20
+	wg.Add(gamesCount)
+	for i := 0; i < gamesCount; i++ {
+		go func(id int) {
+			defer wg.Done()
+
+			uuid := fmt.Sprintf("concurrent-game-%d", id)
+
+			aiVSai(ts, t, uuid)
+
+		}(i)
+	}
+	wg.Wait()
 }
