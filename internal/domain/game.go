@@ -25,9 +25,17 @@ func NewGameService(repo GameRepositoryInterface, pSign, bSign int) *GameService
 func (g *GameService) ValidateField(uuid string, newField Field) error {
 	s, err := g.repo.Load(uuid)
 
-	if err != nil {
+	if err != nil || s == nil {
 		s = &Session{UUID: uuid}
-		g.repo.Save(s)
+		err = g.repo.Save(s)
+		if err != nil {
+			return err
+		}
+	} else {
+		// check if game finished (no more moves allowed)
+		if g.evaluate(&s.F) != 0 || !isMovesLeft(&s.F) {
+			return &ValidationError{Message: "game is already finished"}
+		}
 	}
 
 	changes := 0
