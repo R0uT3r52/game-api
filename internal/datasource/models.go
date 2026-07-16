@@ -1,16 +1,21 @@
 package datasource
 
 import (
-	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type NotFoundError struct {
 	Message string
 }
 
+type DBConnectionError struct {
+	Message string
+}
+
 type Storage struct {
-	Games sync.Map
+	Games *pgxpool.Pool
 }
 
 type GameRepository struct {
@@ -18,7 +23,7 @@ type GameRepository struct {
 }
 
 type GameModel struct {
-	UUID      string
-	Field     [3][3]int
-	ChangedAt time.Time
+	UUID      string    `db:"uuid"`
+	Field     [3][3]int `db:"field"`
+	ChangedAt time.Time `db:"changed_at"`
 }

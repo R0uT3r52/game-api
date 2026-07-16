@@ -6,14 +6,46 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"game-api/internal/datasource"
 	"game-api/internal/domain"
 	"sync"
 	"testing"
 )
 
+type MockRepo struct {
+	Data sync.Map
+}
+
+type notFoundError struct{}
+
+func (e *notFoundError) Error() string {
+	return "Game not found"
+}
+
+func (m *MockRepo) Save(game *domain.Session) error {
+	m.Data.Store(game.UUID, game.F)
+	return nil
+}
+
+func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
+	field, ok := m.Data.Load(uuid)
+	if !ok {
+		return nil, &notFoundError{}
+	}
+
+	s := domain.Session{
+		UUID: uuid,
+		F:    field.(domain.Field),
+	}
+	return &s, nil
+}
+
+// type GameRepositoryInterface interface {
+// 	Save(game *Session) error
+// 	Load(uuid string) (*Session, error)
+// }
+
 func createTestServer() *httptest.Server {
-	repo := datasource.NewGameRepo()
+	repo := &MockRepo{}
 	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
 	gameHandler := NewGameHandler(service)
 
@@ -66,7 +98,7 @@ func TestConcurrent(t *testing.T) {
 func aiVSai(ts *httptest.Server, t *testing.T, uuid string) {
 	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
 
-	clientRepo := datasource.NewGameRepo()
+	clientRepo := &MockRepo{}
 	clientSvc := domain.NewGameService(clientRepo, domain.Nought, domain.Cross)
 
 	currentField := domain.Field{}

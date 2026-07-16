@@ -9,6 +9,7 @@ import (
 	"game-api/internal/domain"
 	"game-api/internal/web"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
 )
 
@@ -42,8 +43,12 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 
 func Injection() fx.Option {
 	return fx.Provide(
-		func() domain.GameRepositoryInterface {
-			return datasource.NewGameRepo()
+		// datasource.NewGameRepo,
+		// domain.NewGameService,
+		// web.NewGameHandler,
+		datasource.GetDB,
+		func(db *pgxpool.Pool) domain.GameRepositoryInterface {
+			return datasource.NewGameRepo(db)
 		},
 		func(repo domain.GameRepositoryInterface) domain.GameServiceInterface {
 			return domain.NewGameService(repo, domain.Cross, domain.Nought)
