@@ -85,3 +85,48 @@ func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
 
 	return ToDomain(&model), nil
 }
+
+func (ur *UserRepository) GetUser(uuid string) (*domain.User, error) {
+	// db user => domain User
+
+	ctx := context.Background()
+	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE uuid=$1`
+
+	rows, _ := ur.Data.Query(ctx, sql, uuid)
+
+	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[UserModel])
+	if err != nil {
+		return nil, err
+	}
+
+	return UserToDomain(&model), nil
+}
+
+func (ur *UserRepository) GetUserByLogin(login string) (*domain.User, error) {
+	ctx := context.Background()
+
+	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE login=$1`
+
+	rows, _ := ur.Data.Query(ctx, sql, login)
+
+	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[UserModel])
+	if err != nil {
+		return nil, err
+	}
+
+	return UserToDomain(&model), nil
+}
+
+func (ur *UserRepository) SaveUser(u domain.User) error {
+	// domain User => db user
+
+	ctx := context.Background()
+
+	sql := `INSERT INTO users (uuid, login, password_hash, created_at)
+			VALUES ($1, $2, $3, $4)`
+
+	model := UserFromDomain(&u)
+
+	_, err := ur.Data.Exec(ctx, sql, model.UUID, model.Login, model.PasswordHash, model.CreatedAt)
+	return err
+}

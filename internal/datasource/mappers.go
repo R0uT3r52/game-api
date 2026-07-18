@@ -23,3 +23,20 @@ func ToDomain(item *GameModel) *domain.Session {
 		F:    f,
 	}
 }
+
+func UserToDomain(item *UserModel) *domain.User {
+	return &domain.User{
+		UUID:         item.UUID,
+		Login:        item.Login,
+		PasswordHash: item.PasswordHash,
+	}
+}
+
+func UserFromDomain(item *domain.User) UserModel {
+	return UserModel{
+		UUID:         item.UUID,
+		Login:        item.Login,
+		PasswordHash: item.PasswordHash,
+		CreatedAt:    time.Now(),
+	}
+}

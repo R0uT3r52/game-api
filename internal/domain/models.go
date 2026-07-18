@@ -36,3 +36,18 @@ type ValidationError struct {
 type GameNotFoundError struct {
 	UUID string
 }
+
+type SignUpRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type User struct {
+	UUID         string
+	Login        string
+	PasswordHash string
+}
+
+type AuthService struct {
+	UserSvc UserServiceInterface
+}

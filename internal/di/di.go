@@ -18,8 +18,14 @@ func NewServeMux() *http.ServeMux {
 	return mux
 }
 
-func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface) {
-	mux.HandleFunc("POST /game/{uuid}", h.PostGame)
+func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHandlerInterface, a web.UserAuthenticatorInterface) {
+
+	authRoute := http.HandlerFunc(h.PostGame)
+
+	mux.Handle("POST /game/{uuid}", a.Middleware(authRoute))
+
+	mux.HandleFunc("POST /signup", u.RegisterUser)
+	mux.HandleFunc("POST /login", u.AuthUser)
 }
 
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
@@ -55,6 +61,18 @@ func Injection() fx.Option {
 		},
 		func(s domain.GameServiceInterface) web.GameHandlerInterface {
 			return web.NewGameHandler(s)
+		},
+		func(db *pgxpool.Pool) domain.UserServiceInterface {
+			return &datasource.UserRepository{Data: db}
+		},
+		func(uSvc domain.UserServiceInterface) domain.AuthServiceInterface {
+			return &domain.AuthService{UserSvc: uSvc}
+		},
+		func(svc domain.AuthServiceInterface) web.UserHandlerInterface {
+			return web.NewUserHandler(svc)
+		},
+		func(svc domain.AuthServiceInterface) web.UserAuthenticatorInterface {
+			return web.NewUserAuthenticator(svc)
 		},
 		NewServeMux,
 		NewHTTPServer,

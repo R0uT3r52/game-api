@@ -27,3 +27,16 @@ type GameModel struct {
 	Field     [3][3]int `db:"field"`
 	ChangedAt time.Time `db:"changed_at"`
 }
+
+// GetUser(uuid string) (*User, error)
+// SaveUser() error
+type UserModel struct {
+	UUID         string    `db:"uuid"`
+	Login        string    `db:"login"`
+	PasswordHash string    `db:"password_hash"`
+	CreatedAt    time.Time `db:"created_at"`
+}
+
+type UserRepository struct {
+	Data *pgxpool.Pool
+}

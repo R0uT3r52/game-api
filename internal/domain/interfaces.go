@@ -10,3 +10,14 @@ type GameServiceInterface interface {
 	ValidateField(uuid string, newField Field) error
 	CheckGameEnd(uuid string) (isEnded bool, winner int, err error)
 }
+
+type UserServiceInterface interface {
+	GetUser(uuid string) (*User, error)
+	GetUserByLogin(login string) (*User, error)
+	SaveUser(u User) error
+}
+
+type AuthServiceInterface interface {
+	Register(req SignUpRequest) error
+	Authorize(authHeader string) (uuid string, err error)
+}
