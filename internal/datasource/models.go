@@ -6,14 +6,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type NotFoundError struct {
-	Message string
-}
-
-type DBConnectionError struct {
-	Message string
-}
-
 type Storage struct {
 	Games *pgxpool.Pool
 }

@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"game-api/internal/domain"
@@ -9,14 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("not found error: %s\n", e.Message)
-}
-
-func (e *DBConnectionError) Error() string {
-	return fmt.Sprintf("DB connection error: %s\n", e.Message)
-}
 
 func GetDB() (*pgxpool.Pool, error) {
 
@@ -111,6 +104,9 @@ func (ur *UserRepository) GetUserByLogin(login string) (*domain.User, error) {
 
 	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[UserModel])
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

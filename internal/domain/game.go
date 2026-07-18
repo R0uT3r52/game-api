@@ -1,18 +1,8 @@
 package domain
 
-import "fmt"
-
 // MakeAiMove(uuid string) (*Session, error)
 // ValidateField(uuid string, newField Field) error
 // CheckGameEnd(uuid string) (isEnded bool, winner int, err error)
-
-func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error: %s\n", e.Message)
-}
-
-func (e *GameNotFoundError) Error() string {
-	return fmt.Sprintf("game not found: %s\n", e.UUID)
-}
 
 func NewGameService(repo GameRepositoryInterface, pSign, bSign int) *GameService {
 	return &GameService{

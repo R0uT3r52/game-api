@@ -29,14 +29,6 @@ type GameService struct {
 	BotSign    int
 }
 
-type ValidationError struct {
-	Message string
-}
-
-type GameNotFoundError struct {
-	UUID string
-}
-
 type SignUpRequest struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`

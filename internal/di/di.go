@@ -49,9 +49,6 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 
 func Injection() fx.Option {
 	return fx.Provide(
-		// datasource.NewGameRepo,
-		// domain.NewGameService,
-		// web.NewGameHandler,
 		datasource.GetDB,
 		func(db *pgxpool.Pool) domain.GameRepositoryInterface {
 			return datasource.NewGameRepo(db)
