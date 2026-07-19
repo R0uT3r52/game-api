@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,22 +14,20 @@ import (
 // Authorize(authHeader string) (uuid string, err error)
 
 func parseHeader(header string) (login, password string, err error) {
-	const prefix = "Basic "
+	data := header
 
-	if !strings.HasPrefix(header, prefix) {
-		return "", "", errors.New("invalid auth header format")
+	if len(header) >= 6 && strings.EqualFold(header[:6], "basic ") {
+		data = header[6:]
 	}
-
-	data := header[len(prefix):]
 
 	decodedBytes, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("auth header decode error: %w", err)
 	}
 
 	creds := strings.SplitN(string(decodedBytes), ":", 2)
 	if len(creds) != 2 {
-		return "", "", errors.New("invalid credentials format")
+		return "", "", errors.New("auth header: invalid credentials format")
 	}
 
 	return creds[0], creds[1], nil

@@ -56,7 +56,8 @@ func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
 		var incorrectCreds *domain.IncorrectCredsError
 		if errors.As(err, &incorrectCreds) || strings.Contains(err.Error(), "auth header") {
 			log.Printf("Unauthorized login attempt: %v", err)
-			w.WriteHeader(http.StatusUnauthorized)
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -82,7 +83,8 @@ func (a *UserAuthenticator) Middleware(h http.Handler) http.Handler {
 		uuid, err := a.AuthService.Authorize(auth)
 		if err != nil {
 			log.Printf("Unauthorized request to protected endpoint %s: %v", r.URL.Path, err)
-			w.WriteHeader(http.StatusUnauthorized)
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
