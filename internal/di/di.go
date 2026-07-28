@@ -20,9 +20,19 @@ func NewServeMux() *http.ServeMux {
 
 func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHandlerInterface, a web.UserAuthenticatorInterface) {
 
-	authRoute := http.HandlerFunc(h.PostGame)
+	authPostGame := http.HandlerFunc(h.PostGame)
+	authCreateGame := http.HandlerFunc(h.CreateGame)
+	authListGames := http.HandlerFunc(h.ListGames)
+	authConnectGame := http.HandlerFunc(h.ConnectGame)
+	authGetCurrentGame := http.HandlerFunc(h.GetCurrentGame)
+	authGetUser := http.HandlerFunc(u.GetUser)
 
-	mux.Handle("POST /game/{uuid}", a.Middleware(authRoute))
+	mux.Handle("POST /game/{uuid}", a.Middleware(authPostGame))
+	mux.Handle("POST /game/new", a.Middleware(authCreateGame))
+	mux.Handle("GET /games/available", a.Middleware(authListGames))
+	mux.Handle("POST /game/connect", a.Middleware(authConnectGame))
+	mux.Handle("GET /game/current", a.Middleware(authGetCurrentGame))
+	mux.Handle("GET /user/{uuid}", a.Middleware(authGetUser))
 
 	mux.HandleFunc("POST /signup", u.RegisterUser)
 	mux.HandleFunc("POST /login", u.AuthUser)

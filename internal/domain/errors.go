@@ -34,3 +34,6 @@ type UserAlreadyExistsError struct {
 func (e *UserAlreadyExistsError) Error() string {
 	return fmt.Sprintf("user already exists error. Login: %s", e.Login)
 }
+
+var ErrGameAlreadyStarted = &ValidationError{Message: "Game already started with another player"}
+

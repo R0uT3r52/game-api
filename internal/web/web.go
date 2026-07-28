@@ -14,72 +14,172 @@ func NewGameHandler(s domain.GameServiceInterface) *GameHandler {
 	}
 }
 
-func (h *GameHandler) SendResponse(w http.ResponseWriter, uuid string, field [3][3]int, winner *int) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GameModel{
-		UUID:   uuid,
-		Field:  field,
-		Winner: winner,
-	})
-}
+func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
+	var createGameRequest CreateGameRequest
 
-func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
-	uuid := r.PathValue("uuid")
-
-	var webModel GameModel
-	if err := json.NewDecoder(r.Body).Decode(&webModel); err != nil {
-		log.Printf("Failed to decode game request body [uuid: %s]: %v", uuid, err)
+	if err := json.NewDecoder(r.Body).Decode(&createGameRequest); err != nil {
+		log.Printf("Failed to decode game create request body: %v", err)
 		http.Error(w, "incorrect request body", http.StatusBadRequest)
 		return
 	}
 
-	domainModel := webModel.WebToDomain()
-
-	if err := h.Service.ValidateField(uuid, domainModel.F); err != nil {
-		log.Printf("Game field validation failed [uuid: %s]: %v", uuid, err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	creatorUUID, ok := r.Context().Value(UserUUIDKey).(string)
+	if !ok {
+		log.Printf("Unauthorized creation")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	isEnded, winner, err := h.Service.CheckGameEnd(uuid)
+	uuid, err := h.Service.CreateGame(creatorUUID, createGameRequest.IsWithBot)
 	if err != nil {
+		log.Printf("Failed to create game: %v", err)
+		http.Error(w, "unable to create game", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(TokenResponse{UUID: uuid})
+}
+
+func (h *GameHandler) ListGames(w http.ResponseWriter, r *http.Request) {
+	ans, err := h.Service.GetAvailableGames()
+	if err != nil {
+		log.Printf("Failed to list games: %v", err)
+		http.Error(w, "unable to list games", http.StatusInternalServerError)
+		return
+	}
+
+	var webModels []GameModel
+	for _, s := range ans {
+		var m GameModel
+		m.DomainToWeb(&s)
+		webModels = append(webModels, m)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err = json.NewEncoder(w).Encode(webModels); err != nil {
+		log.Printf("Failed to encode games: %v", err)
+		http.Error(w, "failed to send games", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
+	var req ConnectGameRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode game request body: %v", err)
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+
+	reqUUID, ok := r.Context().Value(UserUUIDKey).(string)
+	if !ok {
+		log.Printf("Unauthorized access")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sessions, err := h.Service.GetCurrentGames(req.GameUUID, reqUUID)
+	if err != nil {
+		log.Printf("Failed to get active games [gameUUID: %s, userUUID: %s]: %v", req.GameUUID, reqUUID, err)
+		http.Error(w, "incorrect gameUUID", http.StatusBadRequest)
+		return
+	}
+
+	var webModels []GameModel
+	for _, s := range sessions {
+		var m GameModel
+		m.DomainToWeb(&s)
+		webModels = append(webModels, m)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(webModels)
+}
+
+func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
+
+	var req ConnectGameRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode create game request body: %v", err)
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+
+	reqUUID, ok := r.Context().Value(UserUUIDKey).(string)
+	if !ok {
+		log.Printf("Unauthorized connect")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	err := h.Service.Connect(reqUUID, req.GameUUID)
+	if err != nil {
+		if errors.Is(err, domain.ErrGameAlreadyStarted) {
+			log.Printf("Failed to connect to game [uuid: %s]: %v", req.GameUUID, err)
+			http.Error(w, "unable to connect (game already started)", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Failed to connect to game [uuid: %s]: %v", req.GameUUID, err)
+		http.Error(w, "unable to connect to the game", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode("connected successfully")
+}
+
+func (h *GameHandler) SendResponse(w http.ResponseWriter, session *domain.Session) {
+	w.Header().Set("Content-Type", "application/json")
+	var webModel GameModel
+	webModel.DomainToWeb(session)
+	json.NewEncoder(w).Encode(webModel)
+}
+
+func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
+	gameUUID := r.PathValue("uuid")
+
+	playerUUID, ok := r.Context().Value(UserUUIDKey).(string)
+	if !ok {
+		log.Printf("Unauthorized move attempt")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var moveReq MoveRequest
+	if err := json.NewDecoder(r.Body).Decode(&moveReq); err != nil {
+		log.Printf("Failed to decode move request body [uuid: %s]: %v", gameUUID, err)
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+
+	updatedSession, err := h.Service.MakeMove(gameUUID, playerUUID, domain.Field{Grid: moveReq.Field})
+	if err != nil {
+		var valErr *domain.ValidationError
+		if errors.As(err, &valErr) {
+			log.Printf("Move validation failed [uuid: %s]: %v", gameUUID, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Message: valErr.Message})
+			return
+		}
+
 		var notFoundErr *domain.GameNotFoundError
 		if errors.As(err, &notFoundErr) {
-			log.Printf("Game not found [uuid: %s]", uuid)
+			log.Printf("Game not found [uuid: %s]", gameUUID)
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to check game end [uuid: %s]: %v", uuid, err)
+
+		log.Printf("Failed to process move [uuid: %s]: %v", gameUUID, err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	if isEnded {
-		log.Printf("Game ended during check [uuid: %s]: winner %d", uuid, winner)
-		h.SendResponse(w, uuid, domainModel.F.Grid, &winner)
-		return
-	}
-
-	updatedSession, err := h.Service.MakeAiMove(uuid)
-	if err != nil {
-		log.Printf("Failed to make AI move [uuid: %s]: %v", uuid, err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	isEnded, winner, err = h.Service.CheckGameEnd(uuid)
-	if err != nil {
-		log.Printf("Failed to check game end after AI move [uuid: %s]: %v", uuid, err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	if isEnded {
-		log.Printf("Game ended after AI move [uuid: %s]: winner %d", uuid, winner)
-		h.SendResponse(w, uuid, updatedSession.F.Grid, &winner)
-		return
-	}
-
-	log.Printf("Game move processed successfully [uuid: %s]", uuid)
-	h.SendResponse(w, uuid, updatedSession.F.Grid, nil)
+	log.Printf("Move processed successfully [uuid: %s]", gameUUID)
+	h.SendResponse(w, updatedSession)
 }

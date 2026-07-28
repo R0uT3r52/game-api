@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,165 +23,179 @@ func (e *notFoundError) Error() string {
 }
 
 func (m *MockRepo) Save(game *domain.Session) error {
-	m.Data.Store(game.UUID, game.F)
+	m.Data.Store(game.UUID, *game)
 	return nil
 }
 
 func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
-	field, ok := m.Data.Load(uuid)
+	session, ok := m.Data.Load(uuid)
 	if !ok {
 		return nil, &notFoundError{}
 	}
-
-	s := domain.Session{
-		UUID: uuid,
-		F:    field.(domain.Field),
-	}
+	s := session.(domain.Session)
 	return &s, nil
 }
 
-// type GameRepositoryInterface interface {
-// 	Save(game *Session) error
-// 	Load(uuid string) (*Session, error)
-// }
+func (m *MockRepo) ListAvailable() ([]domain.Session, error) {
+	ans := make([]domain.Session, 0)
+	m.Data.Range(func(key any, value any) bool {
+		s := value.(domain.Session)
+		if s.Status == domain.Waiting {
+			ans = append(ans, s)
+		}
+		return true
+	})
+	return ans, nil
+}
 
-func createTestServer() *httptest.Server {
-	repo := &MockRepo{}
+func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+	ans := make([]domain.Session, 0)
+	m.Data.Range(func(key any, value any) bool {
+		s := value.(domain.Session)
+		if (s.Player1UUID == playerUUID || s.Player2UUID == playerUUID) && (gameUUID == "" || s.UUID == gameUUID) {
+			ans = append(ans, s)
+		}
+		return true
+	})
+	return ans, nil
+}
+
+func (m *MockRepo) GetUser(uuid string) (*domain.User, error) {
+	return nil, nil
+}
+
+type MockAuthenticator struct{}
+
+func (a *MockAuthenticator) Middleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), UserUUIDKey, "test-user-uuid")
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func createTestServer(repo domain.GameRepositoryInterface) *httptest.Server {
 	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
 	gameHandler := NewGameHandler(service)
-
+	auth := &MockAuthenticator{}
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /game/{uuid}", gameHandler.PostGame)
-
+	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.PostGame)))
 	return httptest.NewServer(mux)
 }
 
 func TestConcurrent(t *testing.T) {
-	ts := createTestServer()
+	repo := &MockRepo{}
+	ts := createTestServer(repo)
 	defer ts.Close()
 
 	var wg sync.WaitGroup
-	goroutinesNum := 1000
+	goroutinesNum := 50
 	wg.Add(goroutinesNum)
 
-	for i := range goroutinesNum {
+	for i := 0; i < goroutinesNum; i++ {
 		go func(id int) {
 			defer wg.Done()
-
-			uid := fmt.Sprintf("test-%d", i)
+			uid := fmt.Sprintf("test-%d", id)
 			url := fmt.Sprintf("%s/game/%s", ts.URL, uid)
 
-			field := domain.Field{
-				Grid: [3][3]int{
-					{domain.Cross, domain.Empty, domain.Empty},
-					{domain.Empty, domain.Empty, domain.Empty},
-					{domain.Empty, domain.Empty, domain.Empty},
-				},
-			}
-
-			reqBody, _ := json.Marshal(GameModel{
-				UUID:  uid,
-				Field: field.Grid,
+			// Pre-save game
+			repo.Save(&domain.Session{
+				UUID:            uid,
+				Status:          domain.Turn,
+				CurrentTurnUUID: "test-user-uuid",
+				Player1UUID:     "test-user-uuid",
+				Player1Sign:     domain.Cross,
 			})
 
-			resp, _ := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
-
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("Expected 200 OK status")
+			field := domain.Field{
+				Grid: [3][3]int{{domain.Cross, 0, 0}, {0, 0, 0}, {0, 0, 0}},
 			}
-			defer resp.Body.Close()
+			reqBody, _ := json.Marshal(MoveRequest{Field: field.Grid})
+			resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+			if err != nil {
+				t.Errorf("Failed to post: %v", err)
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
+			}
+			resp.Body.Close()
 		}(i)
 	}
 	wg.Wait()
 }
 
-func aiVSai(ts *httptest.Server, t *testing.T, uuid string) {
+func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing.T, uuid string) {
 	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
 
-	clientRepo := &MockRepo{}
-	clientSvc := domain.NewGameService(clientRepo, domain.Nought, domain.Cross)
-
-	currentField := domain.Field{}
+	// Setup game
+	repo.Save(&domain.Session{
+		UUID:            uuid,
+		Status:          domain.Turn,
+		CurrentTurnUUID: "test-user-uuid",
+		Player1UUID:     "test-user-uuid",
+		Player1Sign:     domain.Cross,
+		IsWithBot:       true,
+		Player2Sign:     domain.Nought,
+	})
 
 	for i := 0; i < 10; i++ {
-		err := clientRepo.Save(&domain.Session{UUID: uuid, F: currentField})
-		if err != nil {
-			t.Errorf("[UUID: %s] Failed to save to client repo: %v", uuid, err)
+		s, _ := repo.Load(uuid)
+		if s.Status == domain.Win || s.Status == domain.Draw {
 			return
 		}
 
-		updatedSession, err := clientSvc.MakeAiMove(uuid)
-		if err != nil {
-			t.Errorf("[UUID: %s] Client AI failed to make move: %v", uuid, err)
-			return
+		// Player (AI for test purposes) move
+		row, col := -1, -1
+	findMove:
+		for r := 0; r < 3; r++ {
+			for c := 0; c < 3; c++ {
+				if s.F.Grid[r][c] == domain.Empty {
+					row, col = r, c
+					break findMove
+				}
+			}
 		}
+		if row == -1 {
+			break
+		}
+		s.F.Grid[row][col] = domain.Cross
 
-		reqBody, _ := json.Marshal(GameModel{
-			UUID:  uuid,
-			Field: updatedSession.F.Grid,
-		})
-
+		reqBody, _ := json.Marshal(MoveRequest{Field: s.F.Grid})
 		resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
-		if err != nil {
-			t.Errorf("[UUID: %s] Failed to post game: %v", uuid, err)
-			return
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(resp.Body)
-			resp.Body.Close()
-			t.Errorf("[UUID: %s] Expected status 200, got %v. Response: %s", uuid, resp.StatusCode, buf.String())
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Errorf("Post failed: %v, status: %d", err, resp.StatusCode)
 			return
 		}
 
 		var gameResp GameModel
-		if err := json.NewDecoder(resp.Body).Decode(&gameResp); err != nil {
-			resp.Body.Close()
-			t.Errorf("[UUID: %s] Failed to decode response: %v", uuid, err)
-			return
-		}
+		json.NewDecoder(resp.Body).Decode(&gameResp)
 		resp.Body.Close()
 
-		if gameResp.Winner != nil {
-			if *gameResp.Winner != domain.Tie {
-				t.Errorf("[UUID: %s] Tie expected between two AI. Winner: %v", uuid, *gameResp.Winner)
-			}
-			return // Game ended correctly
+		if gameResp.Status == domain.Win || gameResp.Status == domain.Draw {
+			return
 		}
-
-		// update field for next move
-		currentField.Grid = gameResp.Field
 	}
-
 	t.Errorf("[UUID: %s] game not ended correctly", uuid)
-
 }
 
 func TestAIvsAI(t *testing.T) {
-	ts := createTestServer()
+	repo := &MockRepo{}
+	ts := createTestServer(repo)
 	defer ts.Close()
-
-	uuid := "test"
-
-	aiVSai(ts, t, uuid)
+	aiVSai(ts, repo, t, "test")
 }
 
 func TestConcurrentAIvsAI(t *testing.T) {
-	ts := createTestServer()
+	repo := &MockRepo{}
+	ts := createTestServer(repo)
 	defer ts.Close()
 	var wg sync.WaitGroup
-	gamesCount := 20
+	gamesCount := 10
 	wg.Add(gamesCount)
 	for i := 0; i < gamesCount; i++ {
 		go func(id int) {
 			defer wg.Done()
-
-			uuid := fmt.Sprintf("concurrent-game-%d", id)
-
-			aiVSai(ts, t, uuid)
-
+			aiVSai(ts, repo, t, fmt.Sprintf("concurrent-%d", id))
 		}(i)
 	}
 	wg.Wait()

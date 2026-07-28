@@ -44,6 +44,62 @@ func NewGameRepo(db *pgxpool.Pool) *GameRepository {
 	}
 }
 
+func (r *GameRepository) ListAvailable() ([]domain.Session, error) {
+	ctx := context.Background()
+	ans := make([]domain.Session, 0)
+	sql := `SELECT * FROM games WHERE status=$1 AND is_with_bot is FALSE;`
+
+	rows, err := r.Data.Games.Query(ctx, sql, domain.Waiting)
+	if err != nil {
+		return nil, err
+	}
+
+	models, err := pgx.CollectRows(rows, pgx.RowToStructByName[GameModel])
+	if err != nil {
+		return nil, err
+	}
+
+	for _, elem := range models {
+		s := ToDomain(&elem)
+		ans = append(ans, *s)
+	}
+
+	return ans, nil
+}
+
+func (r *GameRepository) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+	ctx := context.Background()
+	ans := make([]domain.Session, 0)
+
+	var sql string
+	var rows pgx.Rows
+	var err error
+
+	if gameUUID == "" {
+		sql = `SELECT * FROM games WHERE player1_uuid=$1 OR player2_uuid=$1;`
+		rows, err = r.Data.Games.Query(ctx, sql, playerUUID)
+	} else {
+		sql = `SELECT * FROM games WHERE uuid=$2 AND (player1_uuid=$1 OR player2_uuid=$1)`
+		rows, err = r.Data.Games.Query(ctx, sql, playerUUID, gameUUID)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	models, err := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[GameModel])
+	if err != nil {
+		return nil, err
+	}
+
+	for _, elem := range models {
+		s := ToDomain(elem)
+		ans = append(ans, *s)
+	}
+
+	return ans, nil
+}
+
 func (r *GameRepository) Save(game *domain.Session) error {
 
 	// FIX:
@@ -52,12 +108,32 @@ func (r *GameRepository) Save(game *domain.Session) error {
 
 	gameModel := FromDomain(game)
 
-	sql := `INSERT INTO games (uuid, field, changed_at)
-	VALUES ($1, $2, $3)
+	sql := `INSERT INTO games (uuid, field, player1_uuid, player2_uuid, current_turn_uuid, status, is_with_bot, winner_uuid, player1_sign, player2_sign, changed_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	ON CONFLICT (uuid) DO UPDATE
-	SET field = EXCLUDED.field, changed_at = EXCLUDED.changed_at`
+	SET field = EXCLUDED.field,
+		player1_uuid = EXCLUDED.player1_uuid,
+		player2_uuid = EXCLUDED.player2_uuid,
+		current_turn_uuid = EXCLUDED.current_turn_uuid,
+		status = EXCLUDED.status,
+		is_with_bot = EXCLUDED.is_with_bot,
+		winner_uuid = EXCLUDED.winner_uuid,
+		player1_sign = EXCLUDED.player1_sign,
+		player2_sign = EXCLUDED.player2_sign,
+		changed_at = EXCLUDED.changed_at`
 
-	_, err := r.Data.Games.Exec(ctx, sql, gameModel.UUID, gameModel.Field, gameModel.ChangedAt)
+	_, err := r.Data.Games.Exec(ctx, sql,
+		gameModel.UUID,
+		gameModel.Field,
+		gameModel.Player1UUID,
+		gameModel.Player2UUID,
+		gameModel.CurrentTurnUUID,
+		gameModel.Status,
+		gameModel.IsWithBot,
+		gameModel.WinnerUUID,
+		gameModel.Player1Sign,
+		gameModel.Player2Sign,
+		gameModel.ChangedAt)
 	return err
 }
 
@@ -67,9 +143,12 @@ func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
 	// Throw context through the app
 	ctx := context.Background()
 
-	sql := `SELECT uuid, field, changed_at FROM games WHERE uuid=$1`
+	sql := `SELECT uuid, field, player1_uuid, player2_uuid, current_turn_uuid, status, is_with_bot, winner_uuid, player1_sign, player2_sign, changed_at FROM games WHERE uuid=$1`
 
-	rows, _ := r.Data.Games.Query(ctx, sql, uuid)
+	rows, err := r.Data.Games.Query(ctx, sql, uuid)
+	if err != nil {
+		return nil, err
+	}
 
 	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[GameModel])
 	if err != nil {
@@ -85,7 +164,10 @@ func (ur *UserRepository) GetUser(uuid string) (*domain.User, error) {
 	ctx := context.Background()
 	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE uuid=$1`
 
-	rows, _ := ur.Data.Query(ctx, sql, uuid)
+	rows, err := ur.Data.Query(ctx, sql, uuid)
+	if err != nil {
+		return nil, err
+	}
 
 	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[UserModel])
 	if err != nil {
@@ -100,7 +182,10 @@ func (ur *UserRepository) GetUserByLogin(login string) (*domain.User, error) {
 
 	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE login=$1`
 
-	rows, _ := ur.Data.Query(ctx, sql, login)
+	rows, err := ur.Data.Query(ctx, sql, login)
+	if err != nil {
+		return nil, err
+	}
 
 	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[UserModel])
 	if err != nil {

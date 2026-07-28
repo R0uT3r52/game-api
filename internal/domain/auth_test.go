@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/base64"
 	"errors"
 	"testing"
 )
@@ -58,8 +57,7 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 	}
 
 	// 3. Success Authorize
-	authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:alicepassword"))
-	uuid, err := authSvc.Authorize(authHeader)
+	uuid, err := authSvc.Authorize("alice", "alicepassword")
 	if err != nil {
 		t.Fatalf("Authorize failed: %v", err)
 	}
@@ -67,31 +65,25 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 		t.Fatalf("Expected non-empty UUID")
 	}
 
-	// 4. Invalid Header format (no space after Basic)
-	_, err = authSvc.Authorize("Basic" + base64.StdEncoding.EncodeToString([]byte("alice:alicepassword")))
-	if err == nil {
-		t.Errorf("Expected authorization to fail due to missing space in header")
-	}
-
-	// 5. Invalid credentials format (no colon)
-	badCredsHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("alicepassword"))
-	_, err = authSvc.Authorize(badCredsHeader)
-	if err == nil {
-		t.Errorf("Expected authorization to fail due to invalid credentials format")
-	}
-
-	// 6. Wrong password
-	wrongPassHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:wrongpassword"))
-	_, err = authSvc.Authorize(wrongPassHeader)
+	// 4. Wrong password
+	_, err = authSvc.Authorize("alice", "wrongpassword")
 	var incorrectCredsErr *IncorrectCredsError
 	if !errors.As(err, &incorrectCredsErr) {
 		t.Errorf("Expected IncorrectCredsError, got %v", err)
 	}
 
-	// 7. Non-existent user
-	nonExistentHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("bob:bobpassword"))
-	_, err = authSvc.Authorize(nonExistentHeader)
+	// 5. Non-existent user
+	_, err = authSvc.Authorize("bob", "bobpassword")
 	if !errors.As(err, &incorrectCredsErr) {
 		t.Errorf("Expected IncorrectCredsError for non-existent user, got %v", err)
+	}
+
+	// 8. GetUser
+	user, err := authSvc.GetUser(uuid)
+	if err != nil {
+		t.Fatalf("GetUser failed: %v", err)
+	}
+	if user == nil || user.Login != "alice" {
+		t.Errorf("GetUser returned wrong user: %v", user)
 	}
 }

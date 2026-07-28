@@ -47,7 +47,7 @@ func (m *MockUserService) SaveUser(u domain.User) error {
 type dummyHandler struct{}
 
 func (h *dummyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	userUUID := r.Context().Value("user_uuid")
+	userUUID := r.Context().Value(web.UserUUIDKey)
 	if userUUID == nil {
 		http.Error(w, "no user in context", http.StatusInternalServerError)
 		return

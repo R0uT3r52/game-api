@@ -32,6 +32,26 @@ func (m *MockRepo) Load(uuid string) (*Session, error) {
 	return &sCopy, nil
 }
 
+func (m *MockRepo) ListAvailable() ([]Session, error) {
+	ans := make([]Session, 0)
+	for _, s := range m.sessions {
+		if s.Status == Waiting {
+			ans = append(ans, *s)
+		}
+	}
+	return ans, nil
+}
+
+func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]Session, error) {
+	ans := make([]Session, 0)
+	for _, s := range m.sessions {
+		if (s.Player1UUID == playerUUID || s.Player2UUID == playerUUID) && (gameUUID == "" || s.UUID == gameUUID) {
+			ans = append(ans, *s)
+		}
+	}
+	return ans, nil
+}
+
 func TestValidateField(t *testing.T) {
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)

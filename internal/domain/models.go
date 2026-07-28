@@ -7,6 +7,14 @@ const (
 	Nought
 )
 
+// Game states (FSM)
+const (
+	Waiting = iota
+	Turn
+	Draw
+	Win
+)
+
 // Win states
 const (
 	Player = iota
@@ -21,6 +29,17 @@ type Field struct {
 type Session struct {
 	UUID string
 	F    Field
+
+	Player1UUID     string
+	Player2UUID     string
+	CurrentTurnUUID string // Player UUID which turn it is
+
+	Status    int
+	IsWithBot bool
+
+	WinnerUUID  string
+	Player1Sign int
+	Player2Sign int
 }
 
 type GameService struct {
