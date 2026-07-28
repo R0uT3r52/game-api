@@ -23,12 +23,7 @@ func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creatorUUID, ok := r.Context().Value(UserUUIDKey).(string)
-	if !ok {
-		log.Printf("Unauthorized creation")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	creatorUUID := UserUUIDFromContext(r.Context())
 
 	uuid, err := h.Service.CreateGame(creatorUUID, createGameRequest.IsWithBot)
 	if err != nil {
@@ -74,12 +69,7 @@ func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqUUID, ok := r.Context().Value(UserUUIDKey).(string)
-	if !ok {
-		log.Printf("Unauthorized access")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	reqUUID := UserUUIDFromContext(r.Context())
 
 	sessions, err := h.Service.GetCurrentGames(req.GameUUID, reqUUID)
 	if err != nil {
@@ -110,12 +100,7 @@ func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqUUID, ok := r.Context().Value(UserUUIDKey).(string)
-	if !ok {
-		log.Printf("Unauthorized connect")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	reqUUID := UserUUIDFromContext(r.Context())
 
 	err := h.Service.Connect(reqUUID, req.GameUUID)
 	if err != nil {
@@ -143,12 +128,7 @@ func (h *GameHandler) SendResponse(w http.ResponseWriter, session *domain.Sessio
 func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
 	gameUUID := r.PathValue("uuid")
 
-	playerUUID, ok := r.Context().Value(UserUUIDKey).(string)
-	if !ok {
-		log.Printf("Unauthorized move attempt")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	playerUUID := UserUUIDFromContext(r.Context())
 
 	var moveReq MoveRequest
 	if err := json.NewDecoder(r.Body).Decode(&moveReq); err != nil {

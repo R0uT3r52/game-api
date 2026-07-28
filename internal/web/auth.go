@@ -15,6 +15,11 @@ type contextKey string
 
 const UserUUIDKey contextKey = "user_uuid"
 
+func UserUUIDFromContext(ctx context.Context) string {
+	uuid, _ := ctx.Value(UserUUIDKey).(string)
+	return uuid
+}
+
 func parseBasicAuthHeader(header string) (login, password string, err error) {
 	data := header
 
@@ -115,13 +120,6 @@ func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	if userUUID == "" {
 		log.Printf("Failed to get empty user")
 		http.Error(w, "incorrect user uuid", http.StatusBadRequest)
-		return
-	}
-
-	_, ok := r.Context().Value(UserUUIDKey).(string)
-	if !ok {
-		log.Printf("Unauthorized access attempt")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

@@ -276,3 +276,196 @@ func TestCheckGameEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateGame(t *testing.T) {
+	repo := &MockRepo{sessions: make(map[string]*Session)}
+	service := NewGameService(repo, Cross, Nought)
+
+	// PvP Game
+	id1, err := service.CreateGame("p1-uuid", false)
+	if err != nil {
+		t.Fatalf("CreateGame PvP failed: %v", err)
+	}
+	s1, err := repo.Load(id1)
+	if err != nil || s1.Status != Waiting || s1.Player1UUID != "p1-uuid" || s1.IsWithBot {
+		t.Errorf("Unexpected PvP session state: %+v, err: %v", s1, err)
+	}
+
+	// Bot Game
+	id2, err := service.CreateGame("p1-uuid", true)
+	if err != nil {
+		t.Fatalf("CreateGame Bot failed: %v", err)
+	}
+	s2, err := repo.Load(id2)
+	if err != nil || s2.Status != Turn || !s2.IsWithBot || s2.Player2Sign != Nought {
+		t.Errorf("Unexpected Bot session state: %+v, err: %v", s2, err)
+	}
+}
+
+func TestConnect(t *testing.T) {
+	repo := &MockRepo{sessions: make(map[string]*Session)}
+	service := NewGameService(repo, Cross, Nought)
+
+	gameID, _ := service.CreateGame("p1-uuid", false)
+
+	// Valid connect
+	err := service.Connect("p2-uuid", gameID)
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	s, _ := repo.Load(gameID)
+	if s.Player2UUID != "p2-uuid" || s.Status != Turn {
+		t.Errorf("Unexpected session state after connect: %+v", s)
+	}
+
+	// Duplicate connect
+	err = service.Connect("p3-uuid", gameID)
+	if !errors.Is(err, ErrGameAlreadyStarted) {
+		t.Errorf("Expected ErrGameAlreadyStarted, got: %v", err)
+	}
+}
+
+func TestMakeMove(t *testing.T) {
+	repo := &MockRepo{sessions: make(map[string]*Session)}
+	service := NewGameService(repo, Cross, Nought)
+
+	gameID, _ := service.CreateGame("p1-uuid", false)
+	_ = service.Connect("p2-uuid", gameID)
+
+	// 1. Move when not in turn
+	wrongTurnMove := Field{Grid: [3][3]int{{Cross, Empty, Empty}, {Empty, Empty, Empty}, {Empty, Empty, Empty}}}
+	_, err := service.MakeMove(gameID, "p2-uuid", wrongTurnMove)
+	if err == nil {
+		t.Errorf("Expected error for wrong player's turn")
+	}
+
+	// 2. Valid move p1
+	s1, err := service.MakeMove(gameID, "p1-uuid", wrongTurnMove)
+	if err != nil {
+		t.Fatalf("MakeMove p1 failed: %v", err)
+	}
+	if s1.CurrentTurnUUID != "p2-uuid" {
+		t.Errorf("Expected turn to switch to p2, got %s", s1.CurrentTurnUUID)
+	}
+
+	// 3. Move from non-player
+	p2Move := Field{Grid: [3][3]int{{Cross, Empty, Empty}, {Nought, Empty, Empty}, {Empty, Empty, Empty}}}
+	_, err = service.MakeMove(gameID, "stranger-uuid", p2Move)
+	if err == nil {
+		t.Errorf("Expected error for non-player move")
+	}
+
+	// 4. Move in non-turn state
+	gameNotTurnID, _ := service.CreateGame("p1-uuid", false)
+	_, err = service.MakeMove(gameNotTurnID, "p1-uuid", wrongTurnMove)
+	if err == nil {
+		t.Errorf("Expected error when game is not in turn state")
+	}
+
+	// 5. Winning move
+	winningRepo := &MockRepo{sessions: make(map[string]*Session)}
+	winningService := NewGameService(winningRepo, Cross, Nought)
+	wID, _ := winningService.CreateGame("p1", false)
+	_ = winningService.Connect("p2", wID)
+	// Setup field where p1 is about to win
+	session, _ := winningRepo.Load(wID)
+	session.F.Grid = [3][3]int{
+		{Cross, Cross, Empty},
+		{Nought, Nought, Empty},
+		{Empty, Empty, Empty},
+	}
+	winningRepo.Save(session)
+
+	winMove := Field{Grid: [3][3]int{
+		{Cross, Cross, Cross},
+		{Nought, Nought, Empty},
+		{Empty, Empty, Empty},
+	}}
+	winSession, err := winningService.MakeMove(wID, "p1", winMove)
+	if err != nil {
+		t.Fatalf("Winning move failed: %v", err)
+	}
+	if winSession.Status != Win || winSession.WinnerUUID != "p1" {
+		t.Errorf("Expected Win status and p1 winner, got status=%d winner=%s", winSession.Status, winSession.WinnerUUID)
+	}
+
+	// 6. Move with bot
+	botRepo := &MockRepo{sessions: make(map[string]*Session)}
+	botService := NewGameService(botRepo, Cross, Nought)
+	botGameID, _ := botService.CreateGame("p1", true)
+	botMove := Field{Grid: [3][3]int{
+		{Cross, Empty, Empty},
+		{Empty, Empty, Empty},
+		{Empty, Empty, Empty},
+	}}
+	botSession, err := botService.MakeMove(botGameID, "p1", botMove)
+	if err != nil {
+		t.Fatalf("Move with bot failed: %v", err)
+	}
+	if botSession == nil {
+		t.Fatalf("Expected non-nil bot session")
+	}
+}
+
+func TestMakeAiMove(t *testing.T) {
+	repo := &MockRepo{sessions: make(map[string]*Session)}
+	service := NewGameService(repo, Cross, Nought)
+
+	// Game not found
+	_, err := service.MakeAiMove("non-existent")
+	var notFoundErr *GameNotFoundError
+	if !errors.As(err, &notFoundErr) {
+		t.Errorf("Expected GameNotFoundError, got %v", err)
+	}
+
+	// Valid AI move
+	gameID, _ := service.CreateGame("p1", true)
+	s, err := service.MakeAiMove(gameID)
+	if err != nil {
+		t.Fatalf("MakeAiMove failed: %v", err)
+	}
+	if s == nil {
+		t.Fatalf("Expected session after AI move")
+	}
+}
+
+func TestListAvailableAndCurrentGames(t *testing.T) {
+	repo := &MockRepo{sessions: make(map[string]*Session)}
+	service := NewGameService(repo, Cross, Nought)
+
+	g1, _ := service.CreateGame("p1", false)
+	_, _ = service.CreateGame("p2", true)
+
+	available, err := service.GetAvailableGames()
+	if err != nil || len(available) != 1 || available[0].UUID != g1 {
+		t.Errorf("GetAvailableGames failed, expected [g1], got %v (err: %v)", available, err)
+	}
+
+	current, err := service.GetCurrentGames("", "p1")
+	if err != nil || len(current) != 1 || current[0].UUID != g1 {
+		t.Errorf("GetCurrentGames failed, expected [g1], got %v (err: %v)", current, err)
+	}
+}
+
+func TestDomainErrors(t *testing.T) {
+	vErr := &ValidationError{Message: "test validation"}
+	if vErr.Error() == "" {
+		t.Error("ValidationError string is empty")
+	}
+
+	nfErr := &GameNotFoundError{UUID: "test-uuid"}
+	if nfErr.Error() == "" {
+		t.Error("GameNotFoundError string is empty")
+	}
+
+	icErr := &IncorrectCredsError{login: "user", pass: "pass"}
+	if icErr.Error() == "" {
+		t.Error("IncorrectCredsError string is empty")
+	}
+
+	uaErr := &UserAlreadyExistsError{Login: "user"}
+	if uaErr.Error() == "" {
+		t.Error("UserAlreadyExistsError string is empty")
+	}
+}
+

@@ -74,6 +74,11 @@ func (g *GameService) MakeMove(gameUUID, playerUUID string, newField Field) (*Se
 
 	s.F = newField
 
+	err = g.repo.Save(s)
+	if err != nil {
+		return nil, err
+	}
+
 	// Check for end after move
 	ended, winner, _ := g.CheckGameEnd(s.UUID)
 	if ended {

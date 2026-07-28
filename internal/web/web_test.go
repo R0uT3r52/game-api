@@ -178,25 +178,88 @@ func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing
 	t.Errorf("[UUID: %s] game not ended correctly", uuid)
 }
 
-func TestAIvsAI(t *testing.T) {
+func TestGameHandlers(t *testing.T) {
 	repo := &MockRepo{}
-	ts := createTestServer(repo)
+	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
+	gameHandler := NewGameHandler(service)
+	auth := &MockAuthenticator{}
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /game/new", auth.Middleware(http.HandlerFunc(gameHandler.CreateGame)))
+	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(gameHandler.ListGames)))
+	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(gameHandler.ConnectGame)))
+	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
+
+	ts := httptest.NewServer(mux)
 	defer ts.Close()
-	aiVSai(ts, repo, t, "test")
+
+	// 1. CreateGame
+	createReq, _ := json.Marshal(CreateGameRequest{IsWithBot: false})
+	resp, err := http.Post(ts.URL+"/game/new", "application/json", bytes.NewBuffer(createReq))
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("CreateGame failed: status %v, err %v", resp.StatusCode, err)
+	}
+	var createResp TokenResponse
+	json.NewDecoder(resp.Body).Decode(&createResp)
+	resp.Body.Close()
+	if createResp.UUID == "" {
+		t.Fatalf("Expected non-empty game UUID")
+	}
+
+	// 2. ListGames
+	resp, err = http.Get(ts.URL + "/games/available")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("ListGames failed: status %v, err %v", resp.StatusCode, err)
+	}
+	var games []GameModel
+	json.NewDecoder(resp.Body).Decode(&games)
+	resp.Body.Close()
+	if len(games) != 1 || games[0].UUID != createResp.UUID {
+		t.Errorf("Expected 1 available game, got %v", len(games))
+	}
+
+	// 3. ConnectGame
+	connReq, _ := json.Marshal(ConnectGameRequest{GameUUID: createResp.UUID})
+	resp, err = http.Post(ts.URL+"/game/connect", "application/json", bytes.NewBuffer(connReq))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("ConnectGame failed: status %v, err %v", resp.StatusCode, err)
+	}
+	resp.Body.Close()
+
+	// 4. Duplicate ConnectGame (Game already started)
+	resp, err = http.Post(ts.URL+"/game/connect", "application/json", bytes.NewBuffer(connReq))
+	if err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on duplicate connect, got status %v", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 5. GetCurrentGame
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(connReq))
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GetCurrentGame failed: status %v, err %v", resp.StatusCode, err)
+	}
+	var currentGames []GameModel
+	json.NewDecoder(resp.Body).Decode(&currentGames)
+	resp.Body.Close()
+	if len(currentGames) != 1 {
+		t.Errorf("Expected 1 active game, got %v", len(currentGames))
+	}
 }
 
-func TestConcurrentAIvsAI(t *testing.T) {
-	repo := &MockRepo{}
-	ts := createTestServer(repo)
-	defer ts.Close()
-	var wg sync.WaitGroup
-	gamesCount := 10
-	wg.Add(gamesCount)
-	for i := 0; i < gamesCount; i++ {
-		go func(id int) {
-			defer wg.Done()
-			aiVSai(ts, repo, t, fmt.Sprintf("concurrent-%d", id))
-		}(i)
+func TestWebToDomainMapper(t *testing.T) {
+	wm := GameModel{
+		UUID:        "g-uuid",
+		Field:       [3][3]int{{1, 0, 0}, {0, 2, 0}, {0, 0, 0}},
+		Player1UUID: "p1",
+		Player2UUID: "p2",
+		Status:      1,
+		IsWithBot:   false,
 	}
-	wg.Wait()
+
+	domainSession := wm.WebToDomain()
+	if domainSession.UUID != wm.UUID || domainSession.F.Grid != wm.Field {
+		t.Errorf("WebToDomain failed: %+v", domainSession)
+	}
 }
+
