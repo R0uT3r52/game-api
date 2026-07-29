@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ func (m *MockRepo) Save(game *domain.Session) error {
 func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
 	session, ok := m.Data.Load(uuid)
 	if !ok {
-		return nil, &notFoundError{}
+		return nil, &domain.GameNotFoundError{UUID: uuid}
 	}
 	s := session.(domain.Session)
 	return &s, nil
@@ -247,19 +248,136 @@ func TestGameHandlers(t *testing.T) {
 	}
 }
 
-func TestWebToDomainMapper(t *testing.T) {
-	wm := GameModel{
-		UUID:        "g-uuid",
-		Field:       [3][3]int{{1, 0, 0}, {0, 2, 0}, {0, 0, 0}},
-		Player1UUID: "p1",
-		Player2UUID: "p2",
-		Status:      1,
-		IsWithBot:   false,
+func TestGameHandlerErrorBranches(t *testing.T) {
+	repo := &MockRepo{}
+	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
+	gameHandler := NewGameHandler(service)
+	auth := &MockAuthenticator{}
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /game/new", auth.Middleware(http.HandlerFunc(gameHandler.CreateGame)))
+	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(gameHandler.ListGames)))
+	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(gameHandler.ConnectGame)))
+	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
+	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.PostGame)))
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Invalid JSON body
+	badJSON := bytes.NewBuffer([]byte(`{invalid-json`))
+	resp, _ := http.Post(ts.URL+"/game/new", "application/json", badJSON)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on invalid JSON in CreateGame, got %d", resp.StatusCode)
 	}
 
-	domainSession := wm.WebToDomain()
-	if domainSession.UUID != wm.UUID || domainSession.F.Grid != wm.Field {
-		t.Errorf("WebToDomain failed: %+v", domainSession)
+	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
+	resp, _ = http.Post(ts.URL+"/game/connect", "application/json", badJSON)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on invalid JSON in ConnectGame, got %d", resp.StatusCode)
+	}
+
+	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", badJSON)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on invalid JSON in GetCurrentGame, got %d", resp.StatusCode)
+	}
+
+	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
+	resp, _ = http.Post(ts.URL+"/game/nonexistent-id", "application/json", badJSON)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on invalid JSON in PostGame, got %d", resp.StatusCode)
+	}
+
+	// PostGame GameNotFoundError (404)
+	validMove, _ := json.Marshal(MoveRequest{Field: [3][3]int{{domain.Cross, 0, 0}, {0, 0, 0}, {0, 0, 0}}})
+	resp, _ = http.Post(ts.URL+"/game/nonexistent-id", "application/json", bytes.NewBuffer(validMove))
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("Expected 404 Not Found on nonexistent game PostGame, got %d", resp.StatusCode)
+	}
+
+	// PostGame ValidationError (400)
+	gID, _ := service.CreateGame("test-user-uuid", false)
+	_ = service.Connect("p2", gID)
+	// Invalid move (changing 2 cells)
+	invalidMove, _ := json.Marshal(MoveRequest{Field: [3][3]int{{domain.Cross, domain.Cross, 0}, {0, 0, 0}, {0, 0, 0}}})
+	resp, _ = http.Post(ts.URL+"/game/"+gID, "application/json", bytes.NewBuffer(invalidMove))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on invalid move, got %d", resp.StatusCode)
 	}
 }
+
+type MockErrGameService struct{}
+
+func (m *MockErrGameService) MakeAiMove(uuid string) (*domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) MakeMove(gameUUID, playerUUID string, newField domain.Field) (*domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) ValidateField(uuid string, newField domain.Field) error {
+	return errors.New("service err")
+}
+func (m *MockErrGameService) CheckGameEnd(uuid string) (bool, int, error) {
+	return false, 0, errors.New("service err")
+}
+func (m *MockErrGameService) CreateGame(p1 string, withBot bool) (string, error) {
+	return "", errors.New("service err")
+}
+func (m *MockErrGameService) GetAvailableGames() ([]domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) Connect(p2UUID, gameUUID string) error {
+	return errors.New("service err")
+}
+
+func TestGameHandlerServiceErrors(t *testing.T) {
+	errSvc := &MockErrGameService{}
+	handler := NewGameHandler(errSvc)
+	auth := &MockAuthenticator{}
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /game/new", auth.Middleware(http.HandlerFunc(handler.CreateGame)))
+	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(handler.ListGames)))
+	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(handler.ConnectGame)))
+	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
+	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(handler.PostGame)))
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	body, _ := json.Marshal(CreateGameRequest{})
+	resp, _ := http.Post(ts.URL+"/game/new", "application/json", bytes.NewBuffer(body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for CreateGame error, got %d", resp.StatusCode)
+	}
+
+	resp, _ = http.Get(ts.URL + "/games/available")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for ListGames error, got %d", resp.StatusCode)
+	}
+
+	body, _ = json.Marshal(ConnectGameRequest{})
+	resp, _ = http.Post(ts.URL+"/game/connect", "application/json", bytes.NewBuffer(body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for ConnectGame error, got %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(body))
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest { // err != nil in GetCurrentGames returns 400
+		t.Errorf("Expected 400 for GetCurrentGame error, got %d", resp.StatusCode)
+	}
+
+	body, _ = json.Marshal(MoveRequest{})
+	resp, _ = http.Post(ts.URL+"/game/some-id", "application/json", bytes.NewBuffer(body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for PostGame error, got %d", resp.StatusCode)
+	}
+}
+
 

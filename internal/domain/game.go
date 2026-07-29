@@ -231,18 +231,21 @@ func (g *GameService) MakeAiMove(uuid string) (*Session, error) {
 
 	s.F.Grid[r][c] = g.BotSign
 
+	err = g.repo.Save(s)
+	if err != nil {
+		return s, err
+	}
+
 	// Check for end after AI move
 	ended, winner, _ := g.CheckGameEnd(s.UUID)
 	if ended {
 		g.applyEndState(s, winner)
+		err = g.repo.Save(s)
+		if err != nil {
+			return s, err
+		}
 	}
 
-	err = g.repo.Save(s)
-	if err != nil {
-		// Basically move made, but unable to save
-		return s, err
-	}
-	// Move made and was able to save
 	return s, nil
 }
 

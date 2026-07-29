@@ -180,7 +180,7 @@ func TestAuthFlow(t *testing.T) {
 		t.Errorf("Expected middleware to block request with missing auth, got status %d", rec.Code)
 	}
 
-	// 9. Test GetUser handler
+	// 9. Test GetUser handler success
 	req = httptest.NewRequest(http.MethodGet, "/user/"+savedUser.UUID, nil)
 	req.SetPathValue("uuid", savedUser.UUID)
 	rec = httptest.NewRecorder()
@@ -192,6 +192,23 @@ func TestAuthFlow(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&uResp)
 	if uResp.Login != "testuser" || uResp.UUID != savedUser.UUID {
 		t.Errorf("GetUser returned unexpected user: %+v", uResp)
+	}
+
+	// 10. GetUser with empty uuid
+	req = httptest.NewRequest(http.MethodGet, "/user/", nil)
+	rec = httptest.NewRecorder()
+	handler.GetUser(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected GetUser 400 Bad Request on empty UUID, got status %d", rec.Code)
+	}
+
+	// 11. GetUser with non-existent uuid
+	req = httptest.NewRequest(http.MethodGet, "/user/non-existent", nil)
+	req.SetPathValue("uuid", "non-existent")
+	rec = httptest.NewRecorder()
+	handler.GetUser(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected GetUser 404 Not Found, got status %d", rec.Code)
 	}
 }
 
