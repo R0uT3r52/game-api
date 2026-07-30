@@ -32,6 +32,7 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	mux.Handle("GET /games/available", a.Middleware(authListGames))
 	mux.Handle("POST /game/connect", a.Middleware(authConnectGame))
 	mux.Handle("GET /game/current", a.Middleware(authGetCurrentGame))
+	mux.Handle("GET /game/current/{uuid}", a.Middleware(authGetCurrentGame)) // uuid as an optional path parameter
 	mux.Handle("GET /user/{uuid}", a.Middleware(authGetUser))
 
 	mux.HandleFunc("POST /signup", u.RegisterUser)

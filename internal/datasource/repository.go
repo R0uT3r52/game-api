@@ -68,36 +68,34 @@ func (r *GameRepository) ListAvailable() ([]domain.Session, error) {
 }
 
 func (r *GameRepository) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
-	ctx := context.Background()
-	ans := make([]domain.Session, 0)
-
-	var sql string
-	var rows pgx.Rows
-	var err error
-
 	if gameUUID == "" {
-		sql = `SELECT * FROM games WHERE player1_uuid=$1 OR player2_uuid=$1;`
-		rows, err = r.Data.Games.Query(ctx, sql, playerUUID)
-	} else {
-		sql = `SELECT * FROM games WHERE uuid=$2 AND (player1_uuid=$1 OR player2_uuid=$1)`
-		rows, err = r.Data.Games.Query(ctx, sql, playerUUID, gameUUID)
+		ctx := context.Background()
+		ans := make([]domain.Session, 0)
+		sql := `SELECT * FROM games WHERE player1_uuid=$1 OR player2_uuid=$1;`
+		rows, err := r.Data.Games.Query(ctx, sql, playerUUID)
+		if err != nil {
+			return nil, err
+		}
+		models, err := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[GameModel])
+		if err != nil {
+			return nil, err
+		}
+		for _, elem := range models {
+			ans = append(ans, *ToDomain(elem))
+		}
+		return ans, nil
 	}
 
+	session, err := r.Load(gameUUID)
 	if err != nil {
 		return nil, err
 	}
 
-	models, err := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[GameModel])
-	if err != nil {
-		return nil, err
+	if session.Player1UUID != playerUUID && session.Player2UUID != playerUUID {
+		return []domain.Session{}, nil
 	}
 
-	for _, elem := range models {
-		s := ToDomain(elem)
-		ans = append(ans, *s)
-	}
-
-	return ans, nil
+	return []domain.Session{*session}, nil
 }
 
 func (r *GameRepository) Save(game *domain.Session) error {
@@ -143,7 +141,7 @@ func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
 	// Throw context through the app
 	ctx := context.Background()
 
-	sql := `SELECT uuid, field, player1_uuid, player2_uuid, current_turn_uuid, status, is_with_bot, winner_uuid, player1_sign, player2_sign, changed_at FROM games WHERE uuid=$1`
+	sql := `SELECT * FROM games WHERE uuid=$1`
 
 	rows, err := r.Data.Games.Query(ctx, sql, uuid)
 	if err != nil {
@@ -152,6 +150,9 @@ func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
 
 	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[GameModel])
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, &domain.GameNotFoundError{UUID: uuid}
+		}
 		return nil, err
 	}
 

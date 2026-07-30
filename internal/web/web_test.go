@@ -51,6 +51,22 @@ func (m *MockRepo) ListAvailable() ([]domain.Session, error) {
 
 func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
 	ans := make([]domain.Session, 0)
+
+	m.Data.Range(func(key, value any) bool {
+		s := value.(domain.Session)
+		if s.UUID == gameUUID {
+			ans = append(ans, s)
+		}
+		return true
+	})
+
+	if len(ans) == 0 {
+		return nil, &domain.GameNotFoundError{UUID: gameUUID}
+	}
+
+	clear(ans)
+	ans = ans[:0:1]
+
 	m.Data.Range(func(key any, value any) bool {
 		s := value.(domain.Session)
 		if (s.Player1UUID == playerUUID || s.Player2UUID == playerUUID) && (gameUUID == "" || s.UUID == gameUUID) {
@@ -58,6 +74,7 @@ func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Sessio
 		}
 		return true
 	})
+
 	return ans, nil
 }
 
@@ -190,6 +207,7 @@ func TestGameHandlers(t *testing.T) {
 	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(gameHandler.ListGames)))
 	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(gameHandler.ConnectGame)))
 	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
+	mux.Handle("GET /game/current/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -235,8 +253,9 @@ func TestGameHandlers(t *testing.T) {
 	resp.Body.Close()
 
 	// 5. GetCurrentGame
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(connReq))
-	resp, err = http.DefaultClient.Do(req)
+	// req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(connReq))
+	resp, err = http.Get(ts.URL + "/game/current/" + createResp.UUID)
+	// resp, err = http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("GetCurrentGame failed: status %v, err %v", resp.StatusCode, err)
 	}
@@ -259,6 +278,7 @@ func TestGameHandlerErrorBranches(t *testing.T) {
 	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(gameHandler.ListGames)))
 	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(gameHandler.ConnectGame)))
 	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
+	mux.Handle("GET /game/current/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.GetCurrentGame)))
 	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.PostGame)))
 
 	ts := httptest.NewServer(mux)
@@ -278,10 +298,12 @@ func TestGameHandlerErrorBranches(t *testing.T) {
 	}
 
 	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", badJSON)
-	resp, _ = http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request on invalid JSON in GetCurrentGame, got %d", resp.StatusCode)
+	// req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", badJSON)
+
+	resp, _ = http.Get(ts.URL + "/game/current/123123r53ot")
+	// resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("Expected 404 Not Found on invalid path value in GetCurrentGame, got %d", resp.StatusCode)
 	}
 
 	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
@@ -345,6 +367,7 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 	mux.Handle("GET /games/available", auth.Middleware(http.HandlerFunc(handler.ListGames)))
 	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(handler.ConnectGame)))
 	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
+	mux.Handle("GET /game/current/{uuid}", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
 	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(handler.PostGame)))
 
 	ts := httptest.NewServer(mux)
@@ -367,8 +390,10 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 		t.Errorf("Expected 500 for ConnectGame error, got %d", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(body))
-	resp, _ = http.DefaultClient.Do(req)
+	// req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current"+"/", bytes.NewBuffer(body))
+	resp, _ = http.Get(ts.URL + "/game/current")
+	// resp, _ = http.DefaultClient.Do(req)
+	// t.Logf("---------------- Resp status code: %d", resp.StatusCode)
 	if resp.StatusCode != http.StatusBadRequest { // err != nil in GetCurrentGames returns 400
 		t.Errorf("Expected 400 for GetCurrentGame error, got %d", resp.StatusCode)
 	}
@@ -379,5 +404,3 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 		t.Errorf("Expected 500 for PostGame error, got %d", resp.StatusCode)
 	}
 }
-
-

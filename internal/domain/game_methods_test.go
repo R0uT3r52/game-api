@@ -519,7 +519,7 @@ func TestMakeAiMoveBotWin(t *testing.T) {
 	repo.Save(s)
 
 	res, err := service.MakeAiMove(gameID)
-	if err != nil || res.Status != Win || res.WinnerUUID != "bot" {
+	if err != nil || res.Status != Win || res.WinnerUUID != "" {
 		t.Errorf("Expected Bot win, got status %d, winner %s, err %v", res.Status, res.WinnerUUID, err)
 	}
 }

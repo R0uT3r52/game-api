@@ -61,19 +61,21 @@ func (h *GameHandler) ListGames(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
-	var req ConnectGameRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Failed to decode game request body: %v", err)
-		http.Error(w, "incorrect request body", http.StatusBadRequest)
-		return
-	}
+	gameUUID := r.PathValue("uuid")
 
 	reqUUID := UserUUIDFromContext(r.Context())
 
-	sessions, err := h.Service.GetCurrentGames(req.GameUUID, reqUUID)
+	sessions, err := h.Service.GetCurrentGames(gameUUID, reqUUID)
+
+	var e *domain.GameNotFoundError
+	if err != nil && errors.As(err, &e) {
+		log.Printf("Game not found with UUID: %s", gameUUID)
+		http.Error(w, "Game not found with this uuid", http.StatusNotFound)
+		return
+	}
+
 	if err != nil {
-		log.Printf("Failed to get active games [gameUUID: %s, userUUID: %s]: %v", req.GameUUID, reqUUID, err)
+		log.Printf("Failed to get active games [gameUUID: %s, userUUID: %s]: %v", gameUUID, reqUUID, err)
 		http.Error(w, "incorrect gameUUID", http.StatusBadRequest)
 		return
 	}

@@ -1,6 +1,10 @@
 package domain
 
-import "github.com/google/uuid"
+import (
+	"errors"
+
+	"github.com/google/uuid"
+)
 
 // MakeAiMove(uuid string) (*Session, error)
 // ValidateField(uuid string, newField Field) error
@@ -144,7 +148,9 @@ func (g *GameService) applyEndState(s *Session, winner int) {
 	} else if winner == Bot {
 		s.Status = Win
 		if s.IsWithBot {
-			s.WinnerUUID = "bot"
+			// "bot" will cause DB error because of types in PostgreSQL
+			// s.WinnerUUID = "bot"
+			s.WinnerUUID = ""
 		} else {
 			s.WinnerUUID = s.Player2UUID
 		}
@@ -163,6 +169,12 @@ func (g *GameService) GetAvailableGames() ([]Session, error) {
 
 func (g *GameService) GetCurrentGames(gameUUID, playerUUID string) ([]Session, error) {
 	ans, err := g.repo.GetCurrentGames(gameUUID, playerUUID)
+
+	var e *GameNotFoundError
+	if err != nil && errors.As(err, &e) {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, err
 	}
