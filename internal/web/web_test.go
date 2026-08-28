@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"game-api/internal/domain"
 	"net/http"
 	"net/http/httptest"
-	"game-api/internal/domain"
 	"sync"
 	"testing"
 )

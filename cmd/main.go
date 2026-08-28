@@ -1,8 +1,8 @@
 package main
 
 import (
-	"net/http"
 	"game-api/internal/di"
+	"net/http"
 
 	"go.uber.org/fx"
 )

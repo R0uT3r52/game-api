@@ -3,9 +3,9 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"game-api/internal/domain"
 	"log"
 	"net/http"
-	"game-api/internal/domain"
 )
 
 func NewGameHandler(s domain.GameServiceInterface) *GameHandler {

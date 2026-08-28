@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"game-api/internal/domain"
 	"log"
 	"net/http"
-	"game-api/internal/domain"
 	"strings"
 )
 

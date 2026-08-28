@@ -36,4 +36,3 @@ func (e *UserAlreadyExistsError) Error() string {
 }
 
 var ErrGameAlreadyStarted = &ValidationError{Message: "Game already started with another player"}
-

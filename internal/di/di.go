@@ -3,11 +3,11 @@ package di
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
 	"game-api/internal/datasource"
 	"game-api/internal/domain"
 	"game-api/internal/web"
+	"net"
+	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
