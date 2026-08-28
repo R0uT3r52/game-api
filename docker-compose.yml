@@ -1,3 +1,4 @@
+name: game-api
 services:
   api:
     build:
@@ -26,8 +27,6 @@ services:
     env_file: .env
     environment:
       POSTGRES_DB: mydb
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/database.sql:/docker-entrypoint-initdb.d/database.sql

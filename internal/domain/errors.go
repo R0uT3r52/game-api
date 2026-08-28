@@ -7,7 +7,7 @@ type ValidationError struct {
 }
 
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error: %s\n", e.Message)
+	return fmt.Sprintf("validation error: %s", e.Message)
 }
 
 type GameNotFoundError struct {
@@ -15,16 +15,15 @@ type GameNotFoundError struct {
 }
 
 func (e *GameNotFoundError) Error() string {
-	return fmt.Sprintf("game not found: %s\n", e.UUID)
+	return fmt.Sprintf("game not found: %s", e.UUID)
 }
 
 type IncorrectCredsError struct {
 	login string
-	pass  string
 }
 
 func (e *IncorrectCredsError) Error() string {
-	return fmt.Sprintf("incorrect credentials error. Login: %s, Password: %s", e.login, e.pass)
+	return fmt.Sprintf("incorrect credentials error. Login: %s", e.login)
 }
 
 type UserAlreadyExistsError struct {
@@ -36,3 +35,4 @@ func (e *UserAlreadyExistsError) Error() string {
 }
 
 var ErrGameAlreadyStarted = &ValidationError{Message: "Game already started with another player"}
+var ErrUserAlreadyInGame = &ValidationError{Message: "User already in this game"}

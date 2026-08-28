@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -210,5 +211,10 @@ func (ur *UserRepository) SaveUser(u domain.User) error {
 	model := UserFromDomain(&u)
 
 	_, err := ur.Data.Exec(ctx, sql, model.UUID, model.Login, model.PasswordHash, model.CreatedAt)
+	var pgErr *pgconn.PgError
+	// Check for login not unique
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return &domain.UserAlreadyExistsError{Login: u.Login}
+	}
 	return err
 }

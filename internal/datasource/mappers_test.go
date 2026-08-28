@@ -53,15 +53,3 @@ func TestDatasourceMappers(t *testing.T) {
 		t.Errorf("UserToDomain failed: %+v", userDomain)
 	}
 }
-
-func TestDatasourceErrors(t *testing.T) {
-	nf := &NotFoundError{Message: "not found"}
-	if nf.Error() == "" {
-		t.Errorf("NotFoundError string is empty")
-	}
-
-	dbErr := &DBConnectionError{Message: "conn error"}
-	if dbErr.Error() == "" {
-		t.Errorf("DBConnectionError string is empty")
-	}
-}

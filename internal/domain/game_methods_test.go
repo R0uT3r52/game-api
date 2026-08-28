@@ -312,16 +312,63 @@ func TestCreateGame(t *testing.T) {
 func TestConnect(t *testing.T) {
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
+	gameID, _ := service.CreateGame("p1-uuid", true)
+	gameIDWithoutBot, _ := service.CreateGame("p1-uuid", false)
 
-	gameID, _ := service.CreateGame("p1-uuid", false)
+	tests := []struct {
+		name      string
+		p2UID     string
+		gameUID   string
+		wantError error
+	}{
+		{
+			"Test connect p2 to session with bot",
+			"p2-uuid",
+			gameID,
+			ErrGameAlreadyStarted,
+		},
+		{
+			"Test connect p1 to session with bot (connect to p1)",
+			"p1-uuid",
+			gameID,
+			ErrGameAlreadyStarted,
+		},
+		{
+			"Test p1 connect to p1 again",
+			"p1-uuid",
+			gameIDWithoutBot,
+			ErrUserAlreadyInGame,
+		},
+		{
+			"Test connect p2 to session with p1",
+			"p2-uuid",
+			gameIDWithoutBot,
+			nil,
+		},
+		{
+			"Test connect p2 to session with p1 again",
+			"p2-uuid",
+			gameIDWithoutBot,
+			ErrGameAlreadyStarted,
+		},
+	}
 
-	// Valid connect
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.Connect(tt.p2UID, tt.gameUID)
+			if !errors.Is(err, tt.wantError) {
+				t.Errorf("%s failed, got: %v; expected: %v", tt.name, err, tt.wantError)
+			}
+		})
+	}
+
+	// Invalid connect
 	err := service.Connect("p2-uuid", gameID)
-	if err != nil {
+	if err == nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
 	s, _ := repo.Load(gameID)
-	if s.Player2UUID != "p2-uuid" || s.Status != Turn {
+	if s.Player2UUID == "p2-uuid" || s.Status != Turn {
 		t.Errorf("Unexpected session state after connect: %+v", s)
 	}
 
@@ -573,7 +620,7 @@ func TestDomainErrors(t *testing.T) {
 		t.Error("GameNotFoundError string is empty")
 	}
 
-	icErr := &IncorrectCredsError{login: "user", pass: "pass"}
+	icErr := &IncorrectCredsError{login: "user"}
 	if icErr.Error() == "" {
 		t.Error("IncorrectCredsError string is empty")
 	}

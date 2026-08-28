@@ -111,6 +111,11 @@ func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unable to connect (game already started)", http.StatusBadRequest)
 			return
 		}
+		if errors.Is(err, domain.ErrUserAlreadyInGame) {
+			log.Printf("Failed to connect to game [uuid: %s]: %v", req.GameUUID, err)
+			http.Error(w, "unable to connect (user is already in this game)", http.StatusBadRequest)
+			return
+		}
 		log.Printf("Failed to connect to game [uuid: %s]: %v", req.GameUUID, err)
 		http.Error(w, "unable to connect to the game", http.StatusInternalServerError)
 		return

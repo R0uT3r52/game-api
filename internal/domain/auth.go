@@ -6,6 +6,10 @@ import (
 )
 
 func (au *AuthService) Register(req SignUpRequest) error {
+	if len(req.Login) == 0 || len(req.Password) == 0 {
+		return &ValidationError{Message: "User must specify login and password"}
+	}
+
 	existingUser, err := au.UserSvc.GetUserByLogin(req.Login)
 	if err != nil {
 		return err
@@ -37,7 +41,6 @@ func (au *AuthService) Authorize(login, password string) (uuid string, err error
 	if user == nil {
 		return "", &IncorrectCredsError{
 			login: login,
-			pass:  password,
 		}
 	}
 
@@ -45,7 +48,6 @@ func (au *AuthService) Authorize(login, password string) (uuid string, err error
 	if err != nil {
 		return "", &IncorrectCredsError{
 			login: login,
-			pass:  password,
 		}
 	}
 

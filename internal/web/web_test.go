@@ -86,7 +86,11 @@ type MockAuthenticator struct{}
 
 func (a *MockAuthenticator) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), UserUUIDKey, "test-user-uuid")
+		userUUID := r.Header.Get("X-Test-User")
+		if userUUID == "" {
+			userUUID = "test-user-uuid"
+		}
+		ctx := context.WithValue(r.Context(), UserUUIDKey, userUUID)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -237,18 +241,33 @@ func TestGameHandlers(t *testing.T) {
 		t.Errorf("Expected 1 available game, got %v", len(games))
 	}
 
-	// 3. ConnectGame
+	// 3. ConnectGame (as a second player)
 	connReq, _ := json.Marshal(ConnectGameRequest{GameUUID: createResp.UUID})
-	resp, err = http.Post(ts.URL+"/game/connect", "application/json", bytes.NewBuffer(connReq))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(connReq))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-User", "player2-uuid")
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("ConnectGame failed: status %v, err %v", resp.StatusCode, err)
 	}
 	resp.Body.Close()
 
 	// 4. Duplicate ConnectGame (Game already started)
-	resp, err = http.Post(ts.URL+"/game/connect", "application/json", bytes.NewBuffer(connReq))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(connReq))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-User", "player3-uuid")
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request on duplicate connect, got status %v", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 4.1 Self-connect by the creator (host joining own game)
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(connReq))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req) // no X-Test-User -> creator = test-user-uuid
+	if err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request on self-connect, got status %v", resp.StatusCode)
 	}
 	resp.Body.Close()
 

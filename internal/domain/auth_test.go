@@ -86,4 +86,15 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 	if user == nil || user.Login != "alice" {
 		t.Errorf("GetUser returned wrong user: %v", user)
 	}
+
+	// 9. Empty Register
+	req2 := SignUpRequest{
+		Login:    "",
+		Password: "",
+	}
+
+	err2 := authSvc.Register(req2)
+	if err2 == nil {
+		t.Errorf("Registered empty user. login: '%s', password: '%s'", req2.Login, req2.Password)
+	}
 }

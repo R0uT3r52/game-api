@@ -8,6 +8,7 @@ import (
 	"game-api/internal/web"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
@@ -40,7 +41,11 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 }
 
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
-	srv := &http.Server{Addr: ":8080", Handler: mux}
+	port := os.Getenv("PORT")
+	if len(port) == 0 {
+		port = "8080"
+	}
+	srv := &http.Server{Addr: fmt.Sprintf(":%s", port), Handler: mux}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)

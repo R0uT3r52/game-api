@@ -1,8 +1,6 @@
 package domain
 
 import (
-	"errors"
-
 	"github.com/google/uuid"
 )
 
@@ -170,11 +168,6 @@ func (g *GameService) GetAvailableGames() ([]Session, error) {
 func (g *GameService) GetCurrentGames(gameUUID, playerUUID string) ([]Session, error) {
 	ans, err := g.repo.GetCurrentGames(gameUUID, playerUUID)
 
-	var e *GameNotFoundError
-	if err != nil && errors.As(err, &e) {
-		return nil, err
-	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +182,12 @@ func (g *GameService) Connect(p2UUID, gameUUID string) error {
 		return err
 	}
 
-	if s.Player2UUID != "" {
+	if s.Status != Waiting {
 		return ErrGameAlreadyStarted
+	}
+
+	if p2UUID == s.Player1UUID {
+		return ErrUserAlreadyInGame
 	}
 
 	s.Status = Turn

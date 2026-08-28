@@ -63,8 +63,14 @@ func (u *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := u.Service.Register(sReq); err != nil {
 		var existsErr *domain.UserAlreadyExistsError
+		var invalidCredsErr *domain.ValidationError
 		if errors.As(err, &existsErr) {
 			log.Printf("User registration failed: user already exists: %s", sReq.Login)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.As(err, &invalidCredsErr) {
+			log.Printf("User registration failed: invalid user credentials: %s", sReq.Login)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
