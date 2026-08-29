@@ -40,6 +40,22 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	mux.HandleFunc("POST /login", u.AuthUser)
 }
 
+func NewDB(lc fx.Lifecycle) (*pgxpool.Pool, error) {
+	db, err := datasource.GetDB()
+	if err != nil {
+		return nil, err
+	}
+
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			db.Close()
+			return nil
+		},
+	})
+
+	return db, nil
+}
+
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 	port := os.Getenv("PORT")
 	if len(port) == 0 {
@@ -65,7 +81,7 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 
 func Injection() fx.Option {
 	return fx.Provide(
-		datasource.GetDB,
+		NewDB,
 		func(db *pgxpool.Pool) domain.GameRepositoryInterface {
 			return datasource.NewGameRepo(db)
 		},

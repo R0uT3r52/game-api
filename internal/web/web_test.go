@@ -11,10 +11,12 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 type MockRepo struct {
-	Data sync.Map
+	Data    sync.Map
+	Latency time.Duration // DB latency imitation
 }
 
 type notFoundError struct{}
@@ -24,11 +26,17 @@ func (e *notFoundError) Error() string {
 }
 
 func (m *MockRepo) Save(game *domain.Session) error {
+	if m.Latency > 0 {
+		time.Sleep(m.Latency)
+	}
 	m.Data.Store(game.UUID, *game)
 	return nil
 }
 
 func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
+	if m.Latency > 0 {
+		time.Sleep(m.Latency)
+	}
 	session, ok := m.Data.Load(uuid)
 	if !ok {
 		return nil, &domain.GameNotFoundError{UUID: uuid}
@@ -101,49 +109,178 @@ func createTestServer(repo domain.GameRepositoryInterface) *httptest.Server {
 	auth := &MockAuthenticator{}
 	mux := http.NewServeMux()
 	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(gameHandler.PostGame)))
+	mux.Handle("POST /game/connect", auth.Middleware(http.HandlerFunc(gameHandler.ConnectGame)))
 	return httptest.NewServer(mux)
 }
 
-func TestConcurrent(t *testing.T) {
-	repo := &MockRepo{}
+func TestRace_ConcurrentConnect(t *testing.T) {
+	repo := &MockRepo{Latency: 5 * time.Millisecond}
 	ts := createTestServer(repo)
 	defer ts.Close()
 
+	gameUUID := "race-connect-game"
+
+	repo.Save(&domain.Session{
+		UUID:        gameUUID,
+		Status:      domain.Waiting,
+		Player1UUID: "host-player",
+		Player1Sign: domain.Cross,
+	})
+
+	const totalPlayers = 10
 	var wg sync.WaitGroup
-	goroutinesNum := 50
-	wg.Add(goroutinesNum)
+	wg.Add(totalPlayers)
 
-	for i := 0; i < goroutinesNum; i++ {
-		go func(id int) {
+	// channel to start goroutines at the same time
+	start := make(chan struct{})
+
+	var mu sync.Mutex
+	var successCount int
+	var rejectCount int
+
+	for i := range totalPlayers {
+		playerID := fmt.Sprintf("guest-player-%d", i)
+
+		go func(player string) {
 			defer wg.Done()
-			uid := fmt.Sprintf("test-%d", id)
-			url := fmt.Sprintf("%s/game/%s", ts.URL, uid)
 
-			// Pre-save game
-			repo.Save(&domain.Session{
-				UUID:            uid,
-				Status:          domain.Turn,
-				CurrentTurnUUID: "test-user-uuid",
-				Player1UUID:     "test-user-uuid",
-				Player1Sign:     domain.Cross,
-			})
+			body, _ := json.Marshal(ConnectGameRequest{GameUUID: gameUUID})
+			req, _ := http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(body))
+			// Simulate different users
+			req.Header.Set("X-Test-User", fmt.Sprintf("guest-player-%d", i))
 
-			field := domain.Field{
-				Grid: [3][3]int{{domain.Cross, 0, 0}, {0, 0, 0}, {0, 0, 0}},
-			}
-			reqBody, _ := json.Marshal(MoveRequest{Field: field.Grid})
-			resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+			<-start
+
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				t.Errorf("Failed to post: %v", err)
+				t.Errorf("Error on req: %v", err)
 				return
 			}
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
+			defer resp.Body.Close()
+
+			mu.Lock()
+			if resp.StatusCode == http.StatusOK {
+				successCount++
+			} else if resp.StatusCode == http.StatusBadRequest {
+				rejectCount++
+			} else {
+				t.Errorf("Unknow status code: %d", resp.StatusCode)
 			}
-			resp.Body.Close()
-		}(i)
+			mu.Unlock()
+		}(playerID)
 	}
+
+	// start all goroutines
+	close(start)
 	wg.Wait()
+
+	if successCount != 1 {
+		t.Errorf("Race condition: successfully connected players: %d. Rejected: %d",
+			successCount, rejectCount)
+	}
+
+	session, err := repo.Load(gameUUID)
+	if err != nil {
+		t.Fatalf("Unable to load game: %v", err)
+	}
+	if session.Status != domain.Turn {
+		t.Errorf("Expected TurnStatus (%d), got %d", domain.Turn, session.Status)
+	}
+	if session.Player2UUID == "" {
+		t.Errorf("Expected Player2UUID")
+	}
+}
+
+func TestRace_ConcurrentMove(t *testing.T) {
+	repo := &MockRepo{Latency: 5 * time.Millisecond}
+	ts := createTestServer(repo)
+	defer ts.Close()
+
+	gameUUID := "race-move-game"
+
+	// Player1 turn
+	repo.Save(&domain.Session{
+		UUID:            gameUUID,
+		Status:          domain.Turn,
+		Player1UUID:     "player-1",
+		Player2UUID:     "player-2",
+		CurrentTurnUUID: "player-1",
+		Player1Sign:     domain.Cross,
+		Player2Sign:     domain.Nought,
+		F:               domain.Field{},
+	})
+
+	moveA := domain.Field{Grid: [3][3]int{{domain.Cross, 0, 0}, {0, 0, 0}, {0, 0, 0}}}
+	moveB := domain.Field{Grid: [3][3]int{{0, domain.Cross, 0}, {0, 0, 0}, {0, 0, 0}}}
+
+	moves := []domain.Field{moveA, moveB}
+
+	var wg sync.WaitGroup
+	wg.Add(len(moves))
+
+	start := make(chan struct{})
+
+	var mu sync.Mutex
+	var successCount int
+	var failCount int
+
+	for _, move := range moves {
+		go func(f domain.Field) {
+			defer wg.Done()
+
+			body, _ := json.Marshal(MoveRequest{Field: f.Grid})
+			req, _ := http.NewRequest(http.MethodPost, ts.URL+"/game/"+gameUUID, bytes.NewBuffer(body))
+			// Simulate player-1 making moves
+			req.Header.Set("X-Test-User", "player-1")
+
+			<-start
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("Err sending req: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			mu.Lock()
+			if resp.StatusCode == http.StatusOK {
+				successCount++
+			} else {
+				failCount++
+			}
+			mu.Unlock()
+		}(move)
+	}
+
+	close(start)
+	wg.Wait()
+
+	if successCount != 1 {
+		t.Errorf("Race condition: %d turns made (expected 1). Отклонено: %d",
+			successCount, failCount)
+	}
+
+	session, err := repo.Load(gameUUID)
+	if err != nil {
+		t.Fatalf("Error loading game: %v", err)
+	}
+
+	crossCount := 0
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if session.F.Grid[i][j] == domain.Cross {
+				crossCount++
+			}
+		}
+	}
+
+	if crossCount != 1 {
+		t.Errorf("Expected 1 cross, got %d", crossCount)
+	}
+
+	if session.CurrentTurnUUID != "player-2" {
+		t.Errorf("Must be 'player-2' turn, but got %s turn", session.CurrentTurnUUID)
+	}
 }
 
 func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing.T, uuid string) {

@@ -48,6 +48,8 @@ func (g *GameService) CreateGame(p1 string, withBot bool) (id string, err error)
 }
 
 func (g *GameService) MakeMove(gameUUID, playerUUID string, newField Field) (*Session, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	s, err := g.repo.Load(gameUUID)
 	if err != nil {
 		return nil, err
@@ -176,6 +178,8 @@ func (g *GameService) GetCurrentGames(gameUUID, playerUUID string) ([]Session, e
 }
 
 func (g *GameService) Connect(p2UUID, gameUUID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
 	s, err := g.repo.Load(gameUUID)
 	if err != nil {
