@@ -61,7 +61,7 @@ func (u *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := u.Service.Register(sReq); err != nil {
+	if err := u.Service.Register(r.Context(), sReq); err != nil {
 		var existsErr *domain.UserAlreadyExistsError
 		var invalidCredsErr *domain.ValidationError
 		if errors.As(err, &existsErr) {
@@ -95,7 +95,7 @@ func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uuid, err := u.Service.Authorize(login, password)
+	uuid, err := u.Service.Authorize(r.Context(), login, password)
 	if err != nil {
 		var incorrectCreds *domain.IncorrectCredsError
 		if errors.As(err, &incorrectCreds) {
@@ -129,7 +129,7 @@ func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := u.Service.GetUser(userUUID)
+	user, err := u.Service.GetUser(r.Context(), userUUID)
 	if err != nil || user == nil {
 		log.Printf("Failed to get user [uuid: %s]: %v", userUUID, err)
 		http.Error(w, "user not found", http.StatusNotFound)
@@ -155,7 +155,7 @@ func (a *UserAuthenticator) Middleware(h http.Handler) http.Handler {
 			return
 		}
 
-		uuid, err := a.AuthService.Authorize(login, password)
+		uuid, err := a.AuthService.Authorize(r.Context(), login, password)
 		if err != nil {
 			log.Printf("Unauthorized request to protected endpoint %s: %v", r.URL.Path, err)
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)

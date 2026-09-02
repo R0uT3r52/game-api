@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"context"
+
 	"github.com/google/uuid"
 )
 
@@ -19,7 +21,7 @@ func NewGameService(repo GameRepositoryInterface, pSign, bSign int) *GameService
 // Returns uuid of game
 //
 // Error if unable to save game
-func (g *GameService) CreateGame(p1 string, withBot bool) (id string, err error) {
+func (g *GameService) CreateGame(ctx context.Context, p1 string, withBot bool) (id string, err error) {
 
 	uid := uuid.New()
 
@@ -30,7 +32,7 @@ func (g *GameService) CreateGame(p1 string, withBot bool) (id string, err error)
 		player2Sign = Nought
 	}
 
-	err = g.repo.Save(&Session{
+	err = g.repo.Save(ctx, &Session{
 		UUID:            uid.String(),
 		F:               Field{},
 		Player1UUID:     p1,
@@ -47,10 +49,10 @@ func (g *GameService) CreateGame(p1 string, withBot bool) (id string, err error)
 	return uid.String(), err
 }
 
-func (g *GameService) MakeMove(gameUUID, playerUUID string, newField Field) (*Session, error) {
+func (g *GameService) MakeMove(ctx context.Context, gameUUID, playerUUID string, newField Field) (*Session, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	s, err := g.repo.Load(gameUUID)
+	s, err := g.repo.Load(ctx, gameUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,16 +80,16 @@ func (g *GameService) MakeMove(gameUUID, playerUUID string, newField Field) (*Se
 
 	s.F = newField
 
-	err = g.repo.Save(s)
+	err = g.repo.Save(ctx, s)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check for end after move
-	ended, winner, _ := g.CheckGameEnd(s.UUID)
+	ended, winner, _ := g.CheckGameEnd(ctx, s.UUID)
 	if ended {
 		g.applyEndState(s, winner)
-		err = g.repo.Save(s)
+		err = g.repo.Save(ctx, s)
 		return s, err
 	}
 
@@ -100,14 +102,14 @@ func (g *GameService) MakeMove(gameUUID, playerUUID string, newField Field) (*Se
 		}
 	} else {
 		// If with bot, player move is done, save it, then call AI move
-		err = g.repo.Save(s)
+		err = g.repo.Save(ctx, s)
 		if err != nil {
 			return nil, err
 		}
-		return g.MakeAiMove(s.UUID)
+		return g.MakeAiMove(ctx, s.UUID)
 	}
 
-	err = g.repo.Save(s)
+	err = g.repo.Save(ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +160,8 @@ func (g *GameService) applyEndState(s *Session, winner int) {
 	}
 }
 
-func (g *GameService) GetAvailableGames() ([]Session, error) {
-	ans, err := g.repo.ListAvailable()
+func (g *GameService) GetAvailableGames(ctx context.Context) ([]Session, error) {
+	ans, err := g.repo.ListAvailable(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +169,8 @@ func (g *GameService) GetAvailableGames() ([]Session, error) {
 	return ans, nil
 }
 
-func (g *GameService) GetCurrentGames(gameUUID, playerUUID string) ([]Session, error) {
-	ans, err := g.repo.GetCurrentGames(gameUUID, playerUUID)
+func (g *GameService) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error) {
+	ans, err := g.repo.GetCurrentGames(ctx, gameUUID, playerUUID)
 
 	if err != nil {
 		return nil, err
@@ -177,11 +179,11 @@ func (g *GameService) GetCurrentGames(gameUUID, playerUUID string) ([]Session, e
 	return ans, nil
 }
 
-func (g *GameService) Connect(p2UUID, gameUUID string) error {
+func (g *GameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	s, err := g.repo.Load(gameUUID)
+	s, err := g.repo.Load(ctx, gameUUID)
 	if err != nil {
 		return err
 	}
@@ -199,7 +201,7 @@ func (g *GameService) Connect(p2UUID, gameUUID string) error {
 	s.Player2Sign = Nought
 	s.Player2UUID = p2UUID
 
-	err = g.repo.Save(s)
+	err = g.repo.Save(ctx, s)
 	if err != nil {
 		return err
 	}
@@ -207,12 +209,12 @@ func (g *GameService) Connect(p2UUID, gameUUID string) error {
 	return nil
 }
 
-func (g *GameService) ValidateField(uuid string, newField Field) error {
-	s, err := g.repo.Load(uuid)
+func (g *GameService) ValidateField(ctx context.Context, uuid string, newField Field) error {
+	s, err := g.repo.Load(ctx, uuid)
 
 	if err != nil || s == nil {
 		s = &Session{UUID: uuid}
-		err = g.repo.Save(s)
+		err = g.repo.Save(ctx, s)
 		if err != nil {
 			return err
 		}
@@ -228,11 +230,11 @@ func (g *GameService) ValidateField(uuid string, newField Field) error {
 	}
 
 	s.F = newField
-	return g.repo.Save(s)
+	return g.repo.Save(ctx, s)
 }
 
-func (g *GameService) MakeAiMove(uuid string) (*Session, error) {
-	s, err := g.repo.Load(uuid)
+func (g *GameService) MakeAiMove(ctx context.Context, uuid string) (*Session, error) {
+	s, err := g.repo.Load(ctx, uuid)
 	if err != nil {
 		return nil, &GameNotFoundError{UUID: uuid}
 	}
@@ -244,16 +246,16 @@ func (g *GameService) MakeAiMove(uuid string) (*Session, error) {
 
 	s.F.Grid[r][c] = g.BotSign
 
-	err = g.repo.Save(s)
+	err = g.repo.Save(ctx, s)
 	if err != nil {
 		return s, err
 	}
 
 	// Check for end after AI move
-	ended, winner, _ := g.CheckGameEnd(s.UUID)
+	ended, winner, _ := g.CheckGameEnd(ctx, s.UUID)
 	if ended {
 		g.applyEndState(s, winner)
-		err = g.repo.Save(s)
+		err = g.repo.Save(ctx, s)
 		if err != nil {
 			return s, err
 		}
@@ -262,8 +264,8 @@ func (g *GameService) MakeAiMove(uuid string) (*Session, error) {
 	return s, nil
 }
 
-func (g *GameService) CheckGameEnd(uuid string) (isEnded bool, winner int, err error) {
-	s, err := g.repo.Load(uuid)
+func (g *GameService) CheckGameEnd(ctx context.Context, uuid string) (isEnded bool, winner int, err error) {
+	s, err := g.repo.Load(ctx, uuid)
 	if err != nil {
 		return false, -1, &GameNotFoundError{UUID: uuid}
 	}

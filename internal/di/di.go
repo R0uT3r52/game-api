@@ -40,8 +40,8 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	mux.HandleFunc("POST /login", u.AuthUser)
 }
 
-func NewDB(lc fx.Lifecycle) (*pgxpool.Pool, error) {
-	db, err := datasource.GetDB()
+func NewDB(ctx context.Context, lc fx.Lifecycle) (*pgxpool.Pool, error) {
+	db, err := datasource.GetDB(ctx)
 	if err != nil {
 		return nil, err
 	}

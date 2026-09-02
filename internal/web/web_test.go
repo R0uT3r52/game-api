@@ -25,7 +25,7 @@ func (e *notFoundError) Error() string {
 	return "Game not found"
 }
 
-func (m *MockRepo) Save(game *domain.Session) error {
+func (m *MockRepo) Save(ctx context.Context, game *domain.Session) error {
 	if m.Latency > 0 {
 		time.Sleep(m.Latency)
 	}
@@ -33,7 +33,7 @@ func (m *MockRepo) Save(game *domain.Session) error {
 	return nil
 }
 
-func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
+func (m *MockRepo) Load(ctx context.Context, uuid string) (*domain.Session, error) {
 	if m.Latency > 0 {
 		time.Sleep(m.Latency)
 	}
@@ -45,7 +45,7 @@ func (m *MockRepo) Load(uuid string) (*domain.Session, error) {
 	return &s, nil
 }
 
-func (m *MockRepo) ListAvailable() ([]domain.Session, error) {
+func (m *MockRepo) ListAvailable(ctx context.Context) ([]domain.Session, error) {
 	ans := make([]domain.Session, 0)
 	m.Data.Range(func(key any, value any) bool {
 		s := value.(domain.Session)
@@ -57,7 +57,7 @@ func (m *MockRepo) ListAvailable() ([]domain.Session, error) {
 	return ans, nil
 }
 
-func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]domain.Session, error) {
 	ans := make([]domain.Session, 0)
 
 	m.Data.Range(func(key, value any) bool {
@@ -86,7 +86,7 @@ func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Sessio
 	return ans, nil
 }
 
-func (m *MockRepo) GetUser(uuid string) (*domain.User, error) {
+func (m *MockRepo) GetUser(ctx context.Context, uuid string) (*domain.User, error) {
 	return nil, nil
 }
 
@@ -114,13 +114,14 @@ func createTestServer(repo domain.GameRepositoryInterface) *httptest.Server {
 }
 
 func TestRace_ConcurrentConnect(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{Latency: 5 * time.Millisecond}
 	ts := createTestServer(repo)
 	defer ts.Close()
 
 	gameUUID := "race-connect-game"
 
-	repo.Save(&domain.Session{
+	repo.Save(ctx, &domain.Session{
 		UUID:        gameUUID,
 		Status:      domain.Waiting,
 		Player1UUID: "host-player",
@@ -179,7 +180,7 @@ func TestRace_ConcurrentConnect(t *testing.T) {
 			successCount, rejectCount)
 	}
 
-	session, err := repo.Load(gameUUID)
+	session, err := repo.Load(ctx, gameUUID)
 	if err != nil {
 		t.Fatalf("Unable to load game: %v", err)
 	}
@@ -192,6 +193,7 @@ func TestRace_ConcurrentConnect(t *testing.T) {
 }
 
 func TestRace_ConcurrentMove(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{Latency: 5 * time.Millisecond}
 	ts := createTestServer(repo)
 	defer ts.Close()
@@ -199,7 +201,7 @@ func TestRace_ConcurrentMove(t *testing.T) {
 	gameUUID := "race-move-game"
 
 	// Player1 turn
-	repo.Save(&domain.Session{
+	repo.Save(ctx, &domain.Session{
 		UUID:            gameUUID,
 		Status:          domain.Turn,
 		Player1UUID:     "player-1",
@@ -260,7 +262,7 @@ func TestRace_ConcurrentMove(t *testing.T) {
 			successCount, failCount)
 	}
 
-	session, err := repo.Load(gameUUID)
+	session, err := repo.Load(ctx, gameUUID)
 	if err != nil {
 		t.Fatalf("Error loading game: %v", err)
 	}
@@ -285,9 +287,9 @@ func TestRace_ConcurrentMove(t *testing.T) {
 
 func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing.T, uuid string) {
 	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
-
+	ctx := context.Background()
 	// Setup game
-	repo.Save(&domain.Session{
+	repo.Save(ctx, &domain.Session{
 		UUID:            uuid,
 		Status:          domain.Turn,
 		CurrentTurnUUID: "test-user-uuid",
@@ -298,7 +300,7 @@ func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing
 	})
 
 	for i := 0; i < 10; i++ {
-		s, _ := repo.Load(uuid)
+		s, _ := repo.Load(ctx, uuid)
 		if s.Status == domain.Win || s.Status == domain.Draw {
 			return
 		}
@@ -424,6 +426,7 @@ func TestGameHandlers(t *testing.T) {
 }
 
 func TestGameHandlerErrorBranches(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{}
 	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
 	gameHandler := NewGameHandler(service)
@@ -476,8 +479,8 @@ func TestGameHandlerErrorBranches(t *testing.T) {
 	}
 
 	// PostGame ValidationError (400)
-	gID, _ := service.CreateGame("test-user-uuid", false)
-	_ = service.Connect("p2", gID)
+	gID, _ := service.CreateGame(ctx, "test-user-uuid", false)
+	_ = service.Connect(ctx, "p2", gID)
 	// Invalid move (changing 2 cells)
 	invalidMove, _ := json.Marshal(MoveRequest{Field: [3][3]int{{domain.Cross, domain.Cross, 0}, {0, 0, 0}, {0, 0, 0}}})
 	resp, _ = http.Post(ts.URL+"/game/"+gID, "application/json", bytes.NewBuffer(invalidMove))
@@ -488,28 +491,28 @@ func TestGameHandlerErrorBranches(t *testing.T) {
 
 type MockErrGameService struct{}
 
-func (m *MockErrGameService) MakeAiMove(uuid string) (*domain.Session, error) {
+func (m *MockErrGameService) MakeAiMove(ctx context.Context, uuid string) (*domain.Session, error) {
 	return nil, errors.New("service err")
 }
-func (m *MockErrGameService) MakeMove(gameUUID, playerUUID string, newField domain.Field) (*domain.Session, error) {
+func (m *MockErrGameService) MakeMove(ctx context.Context, gameUUID, playerUUID string, newField domain.Field) (*domain.Session, error) {
 	return nil, errors.New("service err")
 }
-func (m *MockErrGameService) ValidateField(uuid string, newField domain.Field) error {
+func (m *MockErrGameService) ValidateField(ctx context.Context, uuid string, newField domain.Field) error {
 	return errors.New("service err")
 }
-func (m *MockErrGameService) CheckGameEnd(uuid string) (bool, int, error) {
+func (m *MockErrGameService) CheckGameEnd(ctx context.Context, uuid string) (bool, int, error) {
 	return false, 0, errors.New("service err")
 }
-func (m *MockErrGameService) CreateGame(p1 string, withBot bool) (string, error) {
+func (m *MockErrGameService) CreateGame(ctx context.Context, p1 string, withBot bool) (string, error) {
 	return "", errors.New("service err")
 }
-func (m *MockErrGameService) GetAvailableGames() ([]domain.Session, error) {
+func (m *MockErrGameService) GetAvailableGames(ctx context.Context) ([]domain.Session, error) {
 	return nil, errors.New("service err")
 }
-func (m *MockErrGameService) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+func (m *MockErrGameService) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]domain.Session, error) {
 	return nil, errors.New("service err")
 }
-func (m *MockErrGameService) Connect(p2UUID, gameUUID string) error {
+func (m *MockErrGameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {
 	return errors.New("service err")
 }
 

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -9,7 +10,7 @@ type MockUserSvc struct {
 	users map[string]User
 }
 
-func (m *MockUserSvc) GetUser(uuid string) (*User, error) {
+func (m *MockUserSvc) GetUser(ctx context.Context, uuid string) (*User, error) {
 	u, ok := m.users[uuid]
 	if !ok {
 		return nil, nil
@@ -17,7 +18,7 @@ func (m *MockUserSvc) GetUser(uuid string) (*User, error) {
 	return &u, nil
 }
 
-func (m *MockUserSvc) GetUserByLogin(login string) (*User, error) {
+func (m *MockUserSvc) GetUserByLogin(ctx context.Context, login string) (*User, error) {
 	for _, u := range m.users {
 		if u.Login == login {
 			return &u, nil
@@ -26,7 +27,7 @@ func (m *MockUserSvc) GetUserByLogin(login string) (*User, error) {
 	return nil, nil
 }
 
-func (m *MockUserSvc) SaveUser(u User) error {
+func (m *MockUserSvc) SaveUser(ctx context.Context, u User) error {
 	if m.users == nil {
 		m.users = make(map[string]User)
 	}
@@ -35,6 +36,7 @@ func (m *MockUserSvc) SaveUser(u User) error {
 }
 
 func TestAuthService_RegisterAndAuthorize(t *testing.T) {
+	ctx := context.Background()
 	userSvc := &MockUserSvc{users: make(map[string]User)}
 	authSvc := &AuthService{UserSvc: userSvc}
 
@@ -44,20 +46,20 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 		Password: "alicepassword",
 	}
 
-	err := authSvc.Register(req)
+	err := authSvc.Register(ctx, req)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
 
 	// 2. Duplicate Register
-	err = authSvc.Register(req)
+	err = authSvc.Register(ctx, req)
 	var duplicateErr *UserAlreadyExistsError
 	if !errors.As(err, &duplicateErr) {
 		t.Errorf("Expected UserAlreadyExistsError, got %v", err)
 	}
 
 	// 3. Success Authorize
-	uuid, err := authSvc.Authorize("alice", "alicepassword")
+	uuid, err := authSvc.Authorize(ctx, "alice", "alicepassword")
 	if err != nil {
 		t.Fatalf("Authorize failed: %v", err)
 	}
@@ -66,20 +68,20 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 	}
 
 	// 4. Wrong password
-	_, err = authSvc.Authorize("alice", "wrongpassword")
+	_, err = authSvc.Authorize(ctx, "alice", "wrongpassword")
 	var incorrectCredsErr *IncorrectCredsError
 	if !errors.As(err, &incorrectCredsErr) {
 		t.Errorf("Expected IncorrectCredsError, got %v", err)
 	}
 
 	// 5. Non-existent user
-	_, err = authSvc.Authorize("bob", "bobpassword")
+	_, err = authSvc.Authorize(ctx, "bob", "bobpassword")
 	if !errors.As(err, &incorrectCredsErr) {
 		t.Errorf("Expected IncorrectCredsError for non-existent user, got %v", err)
 	}
 
 	// 8. GetUser
-	user, err := authSvc.GetUser(uuid)
+	user, err := authSvc.GetUser(ctx, uuid)
 	if err != nil {
 		t.Fatalf("GetUser failed: %v", err)
 	}
@@ -93,7 +95,7 @@ func TestAuthService_RegisterAndAuthorize(t *testing.T) {
 		Password: "",
 	}
 
-	err2 := authSvc.Register(req2)
+	err2 := authSvc.Register(ctx, req2)
 	if err2 == nil {
 		t.Errorf("Registered empty user. login: '%s', password: '%s'", req2.Login, req2.Password)
 	}
