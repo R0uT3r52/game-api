@@ -2,13 +2,11 @@ package web
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"game-api/internal/domain"
 	"log"
 	"net/http"
-	"strings"
 )
 
 type contextKey string
@@ -18,26 +16,6 @@ const UserUUIDKey contextKey = "user_uuid"
 func UserUUIDFromContext(ctx context.Context) string {
 	uuid, _ := ctx.Value(UserUUIDKey).(string)
 	return uuid
-}
-
-func parseBasicAuthHeader(header string) (login, password string, err error) {
-	data := header
-
-	if len(header) >= 6 && strings.EqualFold(header[:6], "basic ") {
-		data = header[6:]
-	}
-
-	decodedBytes, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return "", "", errors.New("auth header decode error")
-	}
-
-	creds := strings.SplitN(string(decodedBytes), ":", 2)
-	if len(creds) != 2 {
-		return "", "", errors.New("auth header: invalid credentials format")
-	}
-
-	return creds[0], creds[1], nil
 }
 
 func NewUserHandler(svc domain.AuthServiceInterface) *UserHandler {
@@ -85,11 +63,10 @@ func (u *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
-	auth := r.Header.Get("Authorization")
 
-	login, password, err := parseBasicAuthHeader(auth)
-	if err != nil {
-		log.Printf("Unauthorized login attempt: %v", err)
+	login, password, ok := r.BasicAuth()
+	if !ok {
+		log.Printf("Unauthorized login attempt")
 		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -145,11 +122,10 @@ func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 func (a *UserAuthenticator) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
 
-		login, password, err := parseBasicAuthHeader(auth)
-		if err != nil {
-			log.Printf("Unauthorized request to protected endpoint %s: %v", r.URL.Path, err)
+		login, password, ok := r.BasicAuth()
+		if !ok {
+			log.Printf("Unauthorized request to protected endpoint %s", r.URL.Path)
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
