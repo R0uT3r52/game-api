@@ -25,7 +25,7 @@ func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
 
 	creatorUUID := UserUUIDFromContext(r.Context())
 
-	uuid, err := h.Service.CreateGame(creatorUUID, createGameRequest.IsWithBot)
+	uuid, err := h.Service.CreateGame(r.Context(), creatorUUID, createGameRequest.IsWithBot)
 	if err != nil {
 		log.Printf("Failed to create game: %v", err)
 		http.Error(w, "unable to create game", http.StatusInternalServerError)
@@ -38,7 +38,7 @@ func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GameHandler) ListGames(w http.ResponseWriter, r *http.Request) {
-	ans, err := h.Service.GetAvailableGames()
+	ans, err := h.Service.GetAvailableGames(r.Context())
 	if err != nil {
 		log.Printf("Failed to list games: %v", err)
 		http.Error(w, "unable to list games", http.StatusInternalServerError)
@@ -65,7 +65,7 @@ func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
 
 	reqUUID := UserUUIDFromContext(r.Context())
 
-	sessions, err := h.Service.GetCurrentGames(gameUUID, reqUUID)
+	sessions, err := h.Service.GetCurrentGames(r.Context(), gameUUID, reqUUID)
 
 	var e *domain.GameNotFoundError
 	if err != nil && errors.As(err, &e) {
@@ -104,7 +104,7 @@ func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
 
 	reqUUID := UserUUIDFromContext(r.Context())
 
-	err := h.Service.Connect(reqUUID, req.GameUUID)
+	err := h.Service.Connect(r.Context(), reqUUID, req.GameUUID)
 	if err != nil {
 		if errors.Is(err, domain.ErrGameAlreadyStarted) {
 			log.Printf("Failed to connect to game [uuid: %s]: %v", req.GameUUID, err)
@@ -144,7 +144,7 @@ func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedSession, err := h.Service.MakeMove(gameUUID, playerUUID, domain.Field{Grid: moveReq.Field})
+	updatedSession, err := h.Service.MakeMove(r.Context(), gameUUID, playerUUID, domain.Field{Grid: moveReq.Field})
 	if err != nil {
 		var valErr *domain.ValidationError
 		if errors.As(err, &valErr) {

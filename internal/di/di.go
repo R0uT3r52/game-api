@@ -41,12 +41,16 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 }
 
 func NewDB(lc fx.Lifecycle) (*pgxpool.Pool, error) {
-	db, err := datasource.GetDB()
+	db, err := datasource.GetDB(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			e := db.Ping(ctx)
+			return e
+		},
 		OnStop: func(ctx context.Context) error {
 			db.Close()
 			return nil

@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"game-api/internal/di"
@@ -19,7 +20,7 @@ type MockUserService struct {
 	users map[string]domain.User
 }
 
-func (m *MockUserService) GetUser(id string) (*domain.User, error) {
+func (m *MockUserService) GetUser(ctx context.Context, id string) (*domain.User, error) {
 	u, ok := m.users[id]
 	if !ok {
 		return nil, nil
@@ -27,7 +28,7 @@ func (m *MockUserService) GetUser(id string) (*domain.User, error) {
 	return &u, nil
 }
 
-func (m *MockUserService) GetUserByLogin(login string) (*domain.User, error) {
+func (m *MockUserService) GetUserByLogin(ctx context.Context, login string) (*domain.User, error) {
 	for _, u := range m.users {
 		if u.Login == login {
 			return &u, nil
@@ -36,7 +37,7 @@ func (m *MockUserService) GetUserByLogin(login string) (*domain.User, error) {
 	return nil, nil
 }
 
-func (m *MockUserService) SaveUser(u domain.User) error {
+func (m *MockUserService) SaveUser(ctx context.Context, u domain.User) error {
 	if m.users == nil {
 		m.users = make(map[string]domain.User)
 	}
@@ -57,6 +58,7 @@ func (h *dummyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestAuthFlow(t *testing.T) {
+	ctx := context.Background()
 	userSvc := &MockUserService{users: make(map[string]domain.User)}
 	authSvc := &domain.AuthService{UserSvc: userSvc}
 	handler := web.NewUserHandler(authSvc)
@@ -78,7 +80,7 @@ func TestAuthFlow(t *testing.T) {
 	}
 
 	// Verify user is in db
-	savedUser, err := userSvc.GetUserByLogin("testuser")
+	savedUser, err := userSvc.GetUserByLogin(ctx, "testuser")
 	if err != nil {
 		t.Fatalf("Failed to fetch user by login: %v", err)
 	}

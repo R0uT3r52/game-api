@@ -12,11 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func GetDB() (*pgxpool.Pool, error) {
-
-	// FIX:
-	// Throw context through the app
-	ctx := context.Background()
+func GetDB(ctx context.Context) (*pgxpool.Pool, error) {
 
 	user := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASSWORD")
@@ -45,8 +41,8 @@ func NewGameRepo(db *pgxpool.Pool) *GameRepository {
 	}
 }
 
-func (r *GameRepository) ListAvailable() ([]domain.Session, error) {
-	ctx := context.Background()
+func (r *GameRepository) ListAvailable(ctx context.Context) ([]domain.Session, error) {
+	// ctx := context.Background()
 	ans := make([]domain.Session, 0)
 	sql := `SELECT * FROM games WHERE status=$1 AND is_with_bot is FALSE;`
 
@@ -68,9 +64,9 @@ func (r *GameRepository) ListAvailable() ([]domain.Session, error) {
 	return ans, nil
 }
 
-func (r *GameRepository) GetCurrentGames(gameUUID, playerUUID string) ([]domain.Session, error) {
+func (r *GameRepository) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]domain.Session, error) {
 	if gameUUID == "" {
-		ctx := context.Background()
+		// ctx := context.Background()
 		ans := make([]domain.Session, 0)
 		sql := `SELECT * FROM games WHERE player1_uuid=$1 OR player2_uuid=$1;`
 		rows, err := r.Data.Games.Query(ctx, sql, playerUUID)
@@ -87,7 +83,7 @@ func (r *GameRepository) GetCurrentGames(gameUUID, playerUUID string) ([]domain.
 		return ans, nil
 	}
 
-	session, err := r.Load(gameUUID)
+	session, err := r.Load(ctx, gameUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,11 +95,7 @@ func (r *GameRepository) GetCurrentGames(gameUUID, playerUUID string) ([]domain.
 	return []domain.Session{*session}, nil
 }
 
-func (r *GameRepository) Save(game *domain.Session) error {
-
-	// FIX:
-	// Throw context through the app
-	ctx := context.Background()
+func (r *GameRepository) Save(ctx context.Context, game *domain.Session) error {
 
 	gameModel := FromDomain(game)
 
@@ -136,11 +128,7 @@ func (r *GameRepository) Save(game *domain.Session) error {
 	return err
 }
 
-func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
-
-	// FIX:
-	// Throw context through the app
-	ctx := context.Background()
+func (r *GameRepository) Load(ctx context.Context, uuid string) (*domain.Session, error) {
 
 	sql := `SELECT * FROM games WHERE uuid=$1`
 
@@ -160,10 +148,10 @@ func (r *GameRepository) Load(uuid string) (*domain.Session, error) {
 	return ToDomain(&model), nil
 }
 
-func (ur *UserRepository) GetUser(uuid string) (*domain.User, error) {
+func (ur *UserRepository) GetUser(ctx context.Context, uuid string) (*domain.User, error) {
 	// db user => domain User
 
-	ctx := context.Background()
+	// ctx := context.Background()
 	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE uuid=$1`
 
 	rows, err := ur.Data.Query(ctx, sql, uuid)
@@ -179,8 +167,8 @@ func (ur *UserRepository) GetUser(uuid string) (*domain.User, error) {
 	return UserToDomain(&model), nil
 }
 
-func (ur *UserRepository) GetUserByLogin(login string) (*domain.User, error) {
-	ctx := context.Background()
+func (ur *UserRepository) GetUserByLogin(ctx context.Context, login string) (*domain.User, error) {
+	// ctx := context.Background()
 
 	sql := `SELECT uuid, login, password_hash, created_at FROM users WHERE login=$1`
 
@@ -200,10 +188,10 @@ func (ur *UserRepository) GetUserByLogin(login string) (*domain.User, error) {
 	return UserToDomain(&model), nil
 }
 
-func (ur *UserRepository) SaveUser(u domain.User) error {
+func (ur *UserRepository) SaveUser(ctx context.Context, u domain.User) error {
 	// domain User => db user
 
-	ctx := context.Background()
+	// ctx := context.Background()
 
 	sql := `INSERT INTO users (uuid, login, password_hash, created_at)
 			VALUES ($1, $2, $3, $4)`

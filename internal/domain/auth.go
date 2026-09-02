@@ -1,16 +1,18 @@
 package domain
 
 import (
+	"context"
+
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func (au *AuthService) Register(req SignUpRequest) error {
+func (au *AuthService) Register(ctx context.Context, req SignUpRequest) error {
 	if len(req.Login) == 0 || len(req.Password) == 0 {
 		return &ValidationError{Message: "User must specify login and password"}
 	}
 
-	existingUser, err := au.UserSvc.GetUserByLogin(req.Login)
+	existingUser, err := au.UserSvc.GetUserByLogin(ctx, req.Login)
 	if err != nil {
 		return err
 	}
@@ -25,7 +27,7 @@ func (au *AuthService) Register(req SignUpRequest) error {
 		return err
 	}
 
-	err = au.UserSvc.SaveUser(User{
+	err = au.UserSvc.SaveUser(ctx, User{
 		UUID:         id.String(),
 		Login:        req.Login,
 		PasswordHash: string(hashedPwd),
@@ -33,8 +35,8 @@ func (au *AuthService) Register(req SignUpRequest) error {
 	return err
 }
 
-func (au *AuthService) Authorize(login, password string) (uuid string, err error) {
-	user, err := au.UserSvc.GetUserByLogin(login)
+func (au *AuthService) Authorize(ctx context.Context, login, password string) (uuid string, err error) {
+	user, err := au.UserSvc.GetUserByLogin(ctx, login)
 	if err != nil {
 		return "", err
 	}
@@ -54,6 +56,6 @@ func (au *AuthService) Authorize(login, password string) (uuid string, err error
 	return user.UUID, nil
 }
 
-func (au *AuthService) GetUser(uuid string) (*User, error) {
-	return au.UserSvc.GetUser(uuid)
+func (au *AuthService) GetUser(ctx context.Context, uuid string) (*User, error) {
+	return au.UserSvc.GetUser(ctx, uuid)
 }

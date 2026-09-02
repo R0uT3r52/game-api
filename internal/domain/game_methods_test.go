@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -12,7 +13,7 @@ type MockRepo struct {
 	listErr  error
 }
 
-func (m *MockRepo) Save(s *Session) error {
+func (m *MockRepo) Save(ctx context.Context, s *Session) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -20,7 +21,7 @@ func (m *MockRepo) Save(s *Session) error {
 	return nil
 }
 
-func (m *MockRepo) Load(uuid string) (*Session, error) {
+func (m *MockRepo) Load(ctx context.Context, uuid string) (*Session, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
@@ -33,7 +34,7 @@ func (m *MockRepo) Load(uuid string) (*Session, error) {
 	return &sCopy, nil
 }
 
-func (m *MockRepo) ListAvailable() ([]Session, error) {
+func (m *MockRepo) ListAvailable(ctx context.Context) ([]Session, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -46,7 +47,7 @@ func (m *MockRepo) ListAvailable() ([]Session, error) {
 	return ans, nil
 }
 
-func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]Session, error) {
+func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -60,6 +61,8 @@ func (m *MockRepo) GetCurrentGames(gameUUID, playerUUID string) ([]Session, erro
 }
 
 func TestValidateField(t *testing.T) {
+	ctx := context.Background()
+
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 	uuid := "test-uuid"
@@ -194,7 +197,7 @@ func TestValidateField(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo.sessions[uuid] = &Session{UUID: uuid, F: tt.initial}
-			err := service.ValidateField(uuid, tt.newField)
+			err := service.ValidateField(ctx, uuid, tt.newField)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateField() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -214,6 +217,7 @@ func TestValidateField(t *testing.T) {
 }
 
 func TestCheckGameEnd(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 	uuid := "test-uuid"
@@ -269,7 +273,7 @@ func TestCheckGameEnd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo.sessions[uuid] = &Session{UUID: uuid, F: tt.field}
-			ended, winner, err := service.CheckGameEnd(uuid)
+			ended, winner, err := service.CheckGameEnd(ctx, uuid)
 			if err != nil {
 				t.Errorf("CheckGameEnd() error = %v", err)
 				return
@@ -285,35 +289,37 @@ func TestCheckGameEnd(t *testing.T) {
 }
 
 func TestCreateGame(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 
 	// PvP Game
-	id1, err := service.CreateGame("p1-uuid", false)
+	id1, err := service.CreateGame(ctx, "p1-uuid", false)
 	if err != nil {
 		t.Fatalf("CreateGame PvP failed: %v", err)
 	}
-	s1, err := repo.Load(id1)
+	s1, err := repo.Load(ctx, id1)
 	if err != nil || s1.Status != Waiting || s1.Player1UUID != "p1-uuid" || s1.IsWithBot {
 		t.Errorf("Unexpected PvP session state: %+v, err: %v", s1, err)
 	}
 
 	// Bot Game
-	id2, err := service.CreateGame("p1-uuid", true)
+	id2, err := service.CreateGame(ctx, "p1-uuid", true)
 	if err != nil {
 		t.Fatalf("CreateGame Bot failed: %v", err)
 	}
-	s2, err := repo.Load(id2)
+	s2, err := repo.Load(ctx, id2)
 	if err != nil || s2.Status != Turn || !s2.IsWithBot || s2.Player2Sign != Nought {
 		t.Errorf("Unexpected Bot session state: %+v, err: %v", s2, err)
 	}
 }
 
 func TestConnect(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
-	gameID, _ := service.CreateGame("p1-uuid", true)
-	gameIDWithoutBot, _ := service.CreateGame("p1-uuid", false)
+	gameID, _ := service.CreateGame(ctx, "p1-uuid", true)
+	gameIDWithoutBot, _ := service.CreateGame(ctx, "p1-uuid", false)
 
 	tests := []struct {
 		name      string
@@ -355,7 +361,7 @@ func TestConnect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := service.Connect(tt.p2UID, tt.gameUID)
+			err := service.Connect(ctx, tt.p2UID, tt.gameUID)
 			if !errors.Is(err, tt.wantError) {
 				t.Errorf("%s failed, got: %v; expected: %v", tt.name, err, tt.wantError)
 			}
@@ -363,38 +369,39 @@ func TestConnect(t *testing.T) {
 	}
 
 	// Invalid connect
-	err := service.Connect("p2-uuid", gameID)
+	err := service.Connect(ctx, "p2-uuid", gameID)
 	if err == nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	s, _ := repo.Load(gameID)
+	s, _ := repo.Load(ctx, gameID)
 	if s.Player2UUID == "p2-uuid" || s.Status != Turn {
 		t.Errorf("Unexpected session state after connect: %+v", s)
 	}
 
 	// Duplicate connect
-	err = service.Connect("p3-uuid", gameID)
+	err = service.Connect(ctx, "p3-uuid", gameID)
 	if !errors.Is(err, ErrGameAlreadyStarted) {
 		t.Errorf("Expected ErrGameAlreadyStarted, got: %v", err)
 	}
 }
 
 func TestMakeMove(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 
-	gameID, _ := service.CreateGame("p1-uuid", false)
-	_ = service.Connect("p2-uuid", gameID)
+	gameID, _ := service.CreateGame(ctx, "p1-uuid", false)
+	_ = service.Connect(ctx, "p2-uuid", gameID)
 
 	// 1. Move when not in turn
 	wrongTurnMove := Field{Grid: [3][3]int{{Cross, Empty, Empty}, {Empty, Empty, Empty}, {Empty, Empty, Empty}}}
-	_, err := service.MakeMove(gameID, "p2-uuid", wrongTurnMove)
+	_, err := service.MakeMove(ctx, gameID, "p2-uuid", wrongTurnMove)
 	if err == nil {
 		t.Errorf("Expected error for wrong player's turn")
 	}
 
 	// 2. Valid move p1
-	s1, err := service.MakeMove(gameID, "p1-uuid", wrongTurnMove)
+	s1, err := service.MakeMove(ctx, gameID, "p1-uuid", wrongTurnMove)
 	if err != nil {
 		t.Fatalf("MakeMove p1 failed: %v", err)
 	}
@@ -404,14 +411,14 @@ func TestMakeMove(t *testing.T) {
 
 	// 3. Move from non-player
 	p2Move := Field{Grid: [3][3]int{{Cross, Empty, Empty}, {Nought, Empty, Empty}, {Empty, Empty, Empty}}}
-	_, err = service.MakeMove(gameID, "stranger-uuid", p2Move)
+	_, err = service.MakeMove(ctx, gameID, "stranger-uuid", p2Move)
 	if err == nil {
 		t.Errorf("Expected error for non-player move")
 	}
 
 	// 4. Move in non-turn state
-	gameNotTurnID, _ := service.CreateGame("p1-uuid", false)
-	_, err = service.MakeMove(gameNotTurnID, "p1-uuid", wrongTurnMove)
+	gameNotTurnID, _ := service.CreateGame(ctx, "p1-uuid", false)
+	_, err = service.MakeMove(ctx, gameNotTurnID, "p1-uuid", wrongTurnMove)
 	if err == nil {
 		t.Errorf("Expected error when game is not in turn state")
 	}
@@ -419,23 +426,23 @@ func TestMakeMove(t *testing.T) {
 	// 5. Winning move
 	winningRepo := &MockRepo{sessions: make(map[string]*Session)}
 	winningService := NewGameService(winningRepo, Cross, Nought)
-	wID, _ := winningService.CreateGame("p1", false)
-	_ = winningService.Connect("p2", wID)
+	wID, _ := winningService.CreateGame(ctx, "p1", false)
+	_ = winningService.Connect(ctx, "p2", wID)
 	// Setup field where p1 is about to win
-	session, _ := winningRepo.Load(wID)
+	session, _ := winningRepo.Load(ctx, wID)
 	session.F.Grid = [3][3]int{
 		{Cross, Cross, Empty},
 		{Nought, Nought, Empty},
 		{Empty, Empty, Empty},
 	}
-	winningRepo.Save(session)
+	winningRepo.Save(ctx, session)
 
 	winMove := Field{Grid: [3][3]int{
 		{Cross, Cross, Cross},
 		{Nought, Nought, Empty},
 		{Empty, Empty, Empty},
 	}}
-	winSession, err := winningService.MakeMove(wID, "p1", winMove)
+	winSession, err := winningService.MakeMove(ctx, wID, "p1", winMove)
 	if err != nil {
 		t.Fatalf("Winning move failed: %v", err)
 	}
@@ -446,13 +453,13 @@ func TestMakeMove(t *testing.T) {
 	// 6. Move with bot
 	botRepo := &MockRepo{sessions: make(map[string]*Session)}
 	botService := NewGameService(botRepo, Cross, Nought)
-	botGameID, _ := botService.CreateGame("p1", true)
+	botGameID, _ := botService.CreateGame(ctx, "p1", true)
 	botMove := Field{Grid: [3][3]int{
 		{Cross, Empty, Empty},
 		{Empty, Empty, Empty},
 		{Empty, Empty, Empty},
 	}}
-	botSession, err := botService.MakeMove(botGameID, "p1", botMove)
+	botSession, err := botService.MakeMove(ctx, botGameID, "p1", botMove)
 	if err != nil {
 		t.Fatalf("Move with bot failed: %v", err)
 	}
@@ -462,19 +469,20 @@ func TestMakeMove(t *testing.T) {
 }
 
 func TestMakeAiMove(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 
 	// Game not found
-	_, err := service.MakeAiMove("non-existent")
+	_, err := service.MakeAiMove(ctx, "non-existent")
 	var notFoundErr *GameNotFoundError
 	if !errors.As(err, &notFoundErr) {
 		t.Errorf("Expected GameNotFoundError, got %v", err)
 	}
 
 	// Valid AI move
-	gameID, _ := service.CreateGame("p1", true)
-	s, err := service.MakeAiMove(gameID)
+	gameID, _ := service.CreateGame(ctx, "p1", true)
+	s, err := service.MakeAiMove(ctx, gameID)
 	if err != nil {
 		t.Fatalf("MakeAiMove failed: %v", err)
 	}
@@ -484,44 +492,46 @@ func TestMakeAiMove(t *testing.T) {
 }
 
 func TestListAvailableAndCurrentGames(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 
-	g1, _ := service.CreateGame("p1", false)
-	_, _ = service.CreateGame("p2", true)
+	g1, _ := service.CreateGame(ctx, "p1", false)
+	_, _ = service.CreateGame(ctx, "p2", true)
 
-	available, err := service.GetAvailableGames()
+	available, err := service.GetAvailableGames(ctx)
 	if err != nil || len(available) != 1 || available[0].UUID != g1 {
 		t.Errorf("GetAvailableGames failed, expected [g1], got %v (err: %v)", available, err)
 	}
 
-	current, err := service.GetCurrentGames("", "p1")
+	current, err := service.GetCurrentGames(ctx, "", "p1")
 	if err != nil || len(current) != 1 || current[0].UUID != g1 {
 		t.Errorf("GetCurrentGames failed, expected [g1], got %v (err: %v)", current, err)
 	}
 }
 
 func TestPvPGameEndAndTie(t *testing.T) {
+	ctx := context.Background()
 	pvpRepo := &MockRepo{sessions: make(map[string]*Session)}
 	pvpService := NewGameService(pvpRepo, Cross, Nought)
-	pID, _ := pvpService.CreateGame("p1", false)
-	_ = pvpService.Connect("p2", pID)
+	pID, _ := pvpService.CreateGame(ctx, "p1", false)
+	_ = pvpService.Connect(ctx, "p2", pID)
 	// P2 (Nought) winning move
-	pSession, _ := pvpRepo.Load(pID)
+	pSession, _ := pvpRepo.Load(ctx, pID)
 	pSession.F.Grid = [3][3]int{
 		{Nought, Nought, Empty},
 		{Cross, Cross, Empty},
 		{Empty, Empty, Empty},
 	}
 	pSession.CurrentTurnUUID = "p2"
-	pvpRepo.Save(pSession)
+	pvpRepo.Save(ctx, pSession)
 
 	p2WinMove := Field{Grid: [3][3]int{
 		{Nought, Nought, Nought},
 		{Cross, Cross, Empty},
 		{Empty, Empty, Empty},
 	}}
-	p2WinSession, err := pvpService.MakeMove(pID, "p2", p2WinMove)
+	p2WinSession, err := pvpService.MakeMove(ctx, pID, "p2", p2WinMove)
 	if err != nil || p2WinSession.Status != Win || p2WinSession.WinnerUUID != "p2" {
 		t.Errorf("Expected p2 win, got status %d, winner %s, err %v", p2WinSession.Status, p2WinSession.WinnerUUID, err)
 	}
@@ -529,54 +539,56 @@ func TestPvPGameEndAndTie(t *testing.T) {
 	// Tie Game
 	tieRepo := &MockRepo{sessions: make(map[string]*Session)}
 	tieService := NewGameService(tieRepo, Cross, Nought)
-	tID, _ := tieService.CreateGame("p1", false)
-	_ = tieService.Connect("p2", tID)
-	tSession, _ := tieRepo.Load(tID)
+	tID, _ := tieService.CreateGame(ctx, "p1", false)
+	_ = tieService.Connect(ctx, "p2", tID)
+	tSession, _ := tieRepo.Load(ctx, tID)
 	tSession.F.Grid = [3][3]int{
 		{Cross, Nought, Cross},
 		{Cross, Nought, Nought},
 		{Nought, Cross, Empty},
 	}
 	tSession.CurrentTurnUUID = "p1"
-	tieRepo.Save(tSession)
+	tieRepo.Save(ctx, tSession)
 
 	tieMove := Field{Grid: [3][3]int{
 		{Cross, Nought, Cross},
 		{Cross, Nought, Nought},
 		{Nought, Cross, Cross},
 	}}
-	tieRes, err := tieService.MakeMove(tID, "p1", tieMove)
+	tieRes, err := tieService.MakeMove(ctx, tID, "p1", tieMove)
 	if err != nil || tieRes.Status != Draw {
 		t.Errorf("Expected Draw status, got status %d, err %v", tieRes.Status, err)
 	}
 }
 
 func TestMakeAiMoveBotWin(t *testing.T) {
+	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 
-	gameID, _ := service.CreateGame("p1", true)
-	s, _ := repo.Load(gameID)
+	gameID, _ := service.CreateGame(ctx, "p1", true)
+	s, _ := repo.Load(ctx, gameID)
 	// Set field so bot wins on next move
 	s.F.Grid = [3][3]int{
 		{Nought, Nought, Empty},
 		{Cross, Cross, Empty},
 		{Empty, Empty, Empty},
 	}
-	repo.Save(s)
+	repo.Save(ctx, s)
 
-	res, err := service.MakeAiMove(gameID)
+	res, err := service.MakeAiMove(ctx, gameID)
 	if err != nil || res.Status != Win || res.WinnerUUID != "" {
 		t.Errorf("Expected Bot win, got status %d, winner %s, err %v", res.Status, res.WinnerUUID, err)
 	}
 }
 
 func TestGameServiceErrorBranches(t *testing.T) {
+	ctx := context.Background()
 	// Repo Save error during CreateGame
 	errRepo := &MockRepo{sessions: make(map[string]*Session), saveErr: errors.New("db save error")}
 	errService := NewGameService(errRepo, Cross, Nought)
 
-	_, err := errService.CreateGame("p1", false)
+	_, err := errService.CreateGame(ctx, "p1", false)
 	if err == nil {
 		t.Error("Expected CreateGame to fail on repo Save error")
 	}
@@ -585,12 +597,12 @@ func TestGameServiceErrorBranches(t *testing.T) {
 	loadErrRepo := &MockRepo{sessions: make(map[string]*Session), loadErr: errors.New("db load error")}
 	loadErrService := NewGameService(loadErrRepo, Cross, Nought)
 
-	_, err = loadErrService.MakeMove("id", "p1", Field{})
+	_, err = loadErrService.MakeMove(ctx, "id", "p1", Field{})
 	if err == nil {
 		t.Error("Expected MakeMove to fail on repo Load error")
 	}
 
-	err = loadErrService.Connect("p2", "id")
+	err = loadErrService.Connect(ctx, "p2", "id")
 	if err == nil {
 		t.Error("Expected Connect to fail on repo Load error")
 	}
@@ -598,12 +610,12 @@ func TestGameServiceErrorBranches(t *testing.T) {
 	listErrRepo := &MockRepo{sessions: make(map[string]*Session), listErr: errors.New("db list error")}
 	listErrService := NewGameService(listErrRepo, Cross, Nought)
 
-	_, err = listErrService.GetAvailableGames()
+	_, err = listErrService.GetAvailableGames(ctx)
 	if err == nil {
 		t.Error("Expected GetAvailableGames to fail on repo ListAvailable error")
 	}
 
-	_, err = listErrService.GetCurrentGames("", "p1")
+	_, err = listErrService.GetCurrentGames(ctx, "", "p1")
 	if err == nil {
 		t.Error("Expected GetCurrentGames to fail on repo GetCurrentGames error")
 	}
