@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"game-api/internal/domain"
 	"log"
 	"net/http"
+	"game-api/internal/domain"
+	"strings"
 )
 
 type contextKey string
@@ -24,9 +25,9 @@ func NewUserHandler(svc domain.AuthServiceInterface) *UserHandler {
 	}
 }
 
-func NewUserAuthenticator(svc domain.AuthServiceInterface) *UserAuthenticator {
+func NewUserAuthenticator(jwtp domain.JwtProviderInterface) *UserAuthenticator {
 	return &UserAuthenticator{
-		AuthService: svc,
+		JwtProvider: jwtp,
 	}
 }
 
@@ -62,38 +63,121 @@ func (u *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
+func (u *UserHandler) UpdateAccessToken(w http.ResponseWriter, r *http.Request) {
+	var refReq RefreshJwtRequest
 
-	login, password, ok := r.BasicAuth()
-	if !ok {
-		log.Printf("Unauthorized login attempt")
-		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	if err := json.NewDecoder(r.Body).Decode(&refReq); err != nil {
+		log.Printf("Failed to decode refresh request: %v", err)
+		http.Error(w, "Unable to parse request data", http.StatusBadRequest)
 		return
 	}
 
-	uuid, err := u.Service.Authorize(r.Context(), login, password)
+	jwtResp, err := u.Service.UpdateAccessToken(r.Context(), refReq.RefreshToken)
 	if err != nil {
-		var incorrectCreds *domain.IncorrectCredsError
-		if errors.As(err, &incorrectCreds) {
-			log.Printf("Unauthorized login attempt: %v", err)
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		var invalidToken *domain.InvalidTokenError
+		var incCreds *domain.IncorrectCredsError
+		if errors.As(err, &invalidToken) {
+			log.Printf("Invalid token to refresh")
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		if errors.As(err, &incCreds) {
+			log.Printf("Incorrect creds in access token refresh")
+			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
 
-		log.Printf("User login failed due to internal error: %v", err)
+		log.Printf("Internal error updating access token: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("User authorized successfully: %s", uuid)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(jwtResp)
+}
+
+func (u *UserHandler) UpdateRefreshToken(w http.ResponseWriter, r *http.Request) {
+	var refReq RefreshJwtRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&refReq); err != nil {
+		log.Printf("Failed to decode refresh request: %v", err)
+		http.Error(w, "Unable to parse request data", http.StatusBadRequest)
+		return
+	}
+
+	jwtResp, err := u.Service.UpdateRefreshToken(r.Context(), refReq.RefreshToken)
+	if err != nil {
+		var invalidToken *domain.InvalidTokenError
+		var incCreds *domain.IncorrectCredsError
+		if errors.As(err, &invalidToken) {
+			log.Printf("Invalid token to refresh")
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		if errors.As(err, &incCreds) {
+			log.Printf("Incorrect creds in refresh token refresh")
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		log.Printf("Internal error updating refresh token: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(struct {
-		UUID string `json:"uuid"`
-	}{
-		UUID: uuid,
+	json.NewEncoder(w).Encode(jwtResp)
+}
+
+func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
+
+	var jwtReq domain.JwtRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&jwtReq); err != nil {
+		log.Printf("Failed to decode jwt request body: %v", err)
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+
+	jwtResp, err := u.Service.Authorize(r.Context(), &jwtReq)
+	if err != nil {
+		var incorrectCreds *domain.IncorrectCredsError
+		if errors.As(err, &incorrectCreds) {
+			log.Printf("Unauthorized login attempt: %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		log.Printf("Internal error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("User authorized successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(jwtResp)
+}
+
+func (u *UserHandler) GetUserByToken(w http.ResponseWriter, r *http.Request) {
+	uuid, ok := r.Context().Value(UserUUIDKey).(string)
+	if !ok || len(uuid) == 0 {
+		log.Printf("Unable to get uuid from context")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	user, err := u.Service.GetUser(r.Context(), uuid)
+	if err != nil || user == nil {
+		log.Printf("Failed to get user [uuid: %s]: %v", uuid, err)
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(UserResponse{
+		UUID:  user.UUID,
+		Login: user.Login,
 	})
 }
 
@@ -123,23 +207,34 @@ func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 func (a *UserAuthenticator) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		login, password, ok := r.BasicAuth()
-		if !ok {
+		authHeader := r.Header.Get("Authorization")
+		if len(authHeader) == 0 {
 			log.Printf("Unauthorized request to protected endpoint %s", r.URL.Path)
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		uuid, err := a.AuthService.Authorize(r.Context(), login, password)
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			log.Printf("Authorization without bearer")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tkn := strings.TrimPrefix(authHeader, "Bearer ")
+
+		err := a.JwtProvider.ValidateAccessToken(tkn)
 		if err != nil {
-			log.Printf("Unauthorized request to protected endpoint %s: %v", r.URL.Path, err)
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			log.Printf("Invalid access token in Middleware: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		log.Printf("Request authorized for %s: user %s", r.URL.Path, uuid)
+		uuid, err := a.JwtProvider.GetUUIDFromToken(tkn)
+		if err != nil {
+			log.Printf("Invalid access token in Middleware: %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), UserUUIDKey, uuid)
 		h.ServeHTTP(w, r.WithContext(ctx))

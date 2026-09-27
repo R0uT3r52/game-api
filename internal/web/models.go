@@ -40,12 +40,16 @@ type TokenResponse struct {
 	UUID string `json:"uuid"`
 }
 
+type RefreshJwtRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 type UserHandler struct {
 	Service domain.AuthServiceInterface
 }
 
 type UserAuthenticator struct {
-	AuthService domain.AuthServiceInterface
+	JwtProvider domain.JwtProviderInterface
 }
 
 type GameHandler struct {

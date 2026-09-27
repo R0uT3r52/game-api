@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"game-api/internal/di"
 	"game-api/internal/domain"
 	"game-api/internal/web"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"

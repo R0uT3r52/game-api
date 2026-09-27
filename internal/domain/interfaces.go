@@ -26,8 +26,20 @@ type UserServiceInterface interface {
 	SaveUser(ctx context.Context, u User) error
 }
 
+type JwtProviderInterface interface {
+	GenerateAccessToken(user *User) (string, error)
+	GenerateRefreshToken(user *User) (string, error)
+
+	ValidateAccessToken(token string) error
+	ValidateRefreshToken(token string) error
+
+	GetUUIDFromToken(token string) (string, error)
+}
+
 type AuthServiceInterface interface {
 	Register(ctx context.Context, req SignUpRequest) error
-	Authorize(ctx context.Context, login, password string) (uuid string, err error)
+	Authorize(ctx context.Context, jwtReq *JwtRequest) (jwtRep *JwtResponse, err error)
 	GetUser(ctx context.Context, uuid string) (*User, error)
+	UpdateAccessToken(ctx context.Context, refreshToken string) (*JwtResponse, error)
+	UpdateRefreshToken(ctx context.Context, refreshToken string) (*JwtResponse, error)
 }

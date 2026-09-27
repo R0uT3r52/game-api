@@ -56,6 +56,21 @@ type SignUpRequest struct {
 	Password string `json:"password"`
 }
 
+type JwtRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type JwtResponse struct {
+	Type         string `json:"type"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type JwtProvider struct {
+	secret []byte
+}
+
 type User struct {
 	UUID         string
 	Login        string
@@ -63,5 +78,6 @@ type User struct {
 }
 
 type AuthService struct {
-	UserSvc UserServiceInterface
+	UserSvc     UserServiceInterface
+	JwtProvider JwtProviderInterface
 }
