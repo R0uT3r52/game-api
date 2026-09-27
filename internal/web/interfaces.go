@@ -16,6 +16,9 @@ type UserHandlerInterface interface {
 	RegisterUser(w http.ResponseWriter, r *http.Request)
 	AuthUser(w http.ResponseWriter, r *http.Request)
 	GetUser(w http.ResponseWriter, r *http.Request)
+	GetUserByToken(w http.ResponseWriter, r *http.Request)
+	UpdateAccessToken(w http.ResponseWriter, r *http.Request)
+	UpdateRefreshToken(w http.ResponseWriter, r *http.Request)
 }
 
 type UserAuthenticatorInterface interface {

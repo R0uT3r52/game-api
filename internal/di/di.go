@@ -27,6 +27,8 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	authConnectGame := http.HandlerFunc(h.ConnectGame)
 	authGetCurrentGame := http.HandlerFunc(h.GetCurrentGame)
 	authGetUser := http.HandlerFunc(u.GetUser)
+	authGetUserByToken := http.HandlerFunc(u.GetUserByToken)
+	authRefreshRefTkn := http.HandlerFunc(u.UpdateRefreshToken)
 
 	mux.Handle("POST /game/{uuid}", a.Middleware(authPostGame))
 	mux.Handle("POST /game/new", a.Middleware(authCreateGame))
@@ -35,9 +37,12 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	mux.Handle("GET /game/current", a.Middleware(authGetCurrentGame))
 	mux.Handle("GET /game/current/{uuid}", a.Middleware(authGetCurrentGame)) // uuid as an optional path parameter
 	mux.Handle("GET /user/{uuid}", a.Middleware(authGetUser))
+	mux.Handle("GET /user", a.Middleware(authGetUserByToken))
+	mux.Handle("POST /refresh-ref", a.Middleware(authRefreshRefTkn))
 
 	mux.HandleFunc("POST /signup", u.RegisterUser)
 	mux.HandleFunc("POST /login", u.AuthUser)
+	mux.HandleFunc("POST /refresh-acc", u.UpdateAccessToken)
 }
 
 func NewDB(lc fx.Lifecycle) (*pgxpool.Pool, error) {
@@ -86,6 +91,7 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 func Injection() fx.Option {
 	return fx.Provide(
 		NewDB,
+		domain.NewJwtProvider,
 		func(db *pgxpool.Pool) domain.GameRepositoryInterface {
 			return datasource.NewGameRepo(db)
 		},
@@ -98,14 +104,14 @@ func Injection() fx.Option {
 		func(db *pgxpool.Pool) domain.UserServiceInterface {
 			return &datasource.UserRepository{Data: db}
 		},
-		func(uSvc domain.UserServiceInterface) domain.AuthServiceInterface {
-			return &domain.AuthService{UserSvc: uSvc}
+		func(uSvc domain.UserServiceInterface, jwtP domain.JwtProviderInterface) domain.AuthServiceInterface {
+			return &domain.AuthService{UserSvc: uSvc, JwtProvider: jwtP}
 		},
 		func(svc domain.AuthServiceInterface) web.UserHandlerInterface {
 			return web.NewUserHandler(svc)
 		},
-		func(svc domain.AuthServiceInterface) web.UserAuthenticatorInterface {
-			return web.NewUserAuthenticator(svc)
+		func(jwtP domain.JwtProviderInterface) web.UserAuthenticatorInterface {
+			return web.NewUserAuthenticator(jwtP)
 		},
 		NewServeMux,
 		NewHTTPServer,

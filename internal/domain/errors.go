@@ -34,5 +34,19 @@ func (e *UserAlreadyExistsError) Error() string {
 	return fmt.Sprintf("user already exists error. Login: %s", e.Login)
 }
 
+type InvalidTokenError struct {
+	Token string
+}
+
+func (e *InvalidTokenError) Error() string {
+	return fmt.Sprintf("invalid token: %s", e.Token)
+}
+
+type JwtSecretError struct{}
+
+func (e *JwtSecretError) Error() string {
+	return fmt.Sprintf("unable to find JWT_SECRET env variable")
+}
+
 var ErrGameAlreadyStarted = &ValidationError{Message: "Game already started with another player"}
 var ErrUserAlreadyInGame = &ValidationError{Message: "User already in this game"}
