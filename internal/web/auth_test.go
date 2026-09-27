@@ -3,7 +3,6 @@ package web_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,12 +56,23 @@ func (h *dummyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+func setupWebJwtProvider(t *testing.T) domain.JwtProviderInterface {
+	t.Helper()
+	t.Setenv("JWT_SECRET", "test-secret-web-key-12345")
+	jwtProvider, err := domain.NewJwtProvider()
+	if err != nil {
+		t.Fatalf("Failed to create JwtProvider: %v", err)
+	}
+	return jwtProvider
+}
+
 func TestAuthFlow(t *testing.T) {
 	ctx := context.Background()
 	userSvc := &MockUserService{users: make(map[string]domain.User)}
-	authSvc := &domain.AuthService{UserSvc: userSvc}
+	jwtProvider := setupWebJwtProvider(t)
+	authSvc := &domain.AuthService{UserSvc: userSvc, JwtProvider: jwtProvider}
 	handler := web.NewUserHandler(authSvc)
-	authenticator := web.NewUserAuthenticator(authSvc)
+	authenticator := web.NewUserAuthenticator(jwtProvider)
 
 	// 1. Register user
 	signUpPayload := domain.SignUpRequest{
@@ -101,36 +111,52 @@ func TestAuthFlow(t *testing.T) {
 		t.Errorf("Expected status 400 Bad Request on duplicate registration, got %d", rec.Code)
 	}
 
-	// 3. Login with correct credentials
-	creds := base64.StdEncoding.EncodeToString([]byte("testuser:password123"))
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Basic "+creds)
+	// 3. Login with correct credentials (JWT login)
+	loginPayload := domain.JwtRequest{
+		Login:    "testuser",
+		Password: "password123",
+	}
+	loginJSON, _ := json.Marshal(loginPayload)
+	req = httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(loginJSON))
 	rec = httptest.NewRecorder()
 	handler.AuthUser(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 OK on correct login, got %d", rec.Code)
+		t.Fatalf("Expected status 200 OK on correct login, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 
-	var loginResp struct {
-		UUID string `json:"uuid"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
-		t.Fatalf("Failed to decode login response: %v", err)
+	var jwtResp domain.JwtResponse
+	if err := json.NewDecoder(rec.Body).Decode(&jwtResp); err != nil {
+		t.Fatalf("Failed to decode jwt login response: %v", err)
 	}
 
-	parsedUUID, err := uuid.Parse(loginResp.UUID)
+	if jwtResp.Type != "Bearer" {
+		t.Errorf("Expected token type 'Bearer', got '%s'", jwtResp.Type)
+	}
+	if jwtResp.AccessToken == "" || jwtResp.RefreshToken == "" {
+		t.Fatalf("Expected non-empty AccessToken and RefreshToken in login response")
+	}
+
+	// Verify UUID in access token matches saved user
+	uuidFromToken, err := jwtProvider.GetUUIDFromToken(jwtResp.AccessToken)
 	if err != nil {
-		t.Fatalf("Response UUID is invalid: %v", err)
+		t.Fatalf("Failed to parse UUID from access token: %v", err)
+	}
+	parsedUUID, err := uuid.Parse(uuidFromToken)
+	if err != nil {
+		t.Fatalf("Extracted UUID is invalid: %v", err)
 	}
 	if parsedUUID.String() != savedUser.UUID {
-		t.Errorf("Response UUID %s does not match saved UUID %s", parsedUUID.String(), savedUser.UUID)
+		t.Errorf("Token UUID %s does not match saved UUID %s", parsedUUID.String(), savedUser.UUID)
 	}
 
 	// 4. Login with incorrect password
-	badCreds := base64.StdEncoding.EncodeToString([]byte("testuser:wrongpassword"))
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Basic "+badCreds)
+	badLoginPayload := domain.JwtRequest{
+		Login:    "testuser",
+		Password: "wrongpassword",
+	}
+	badLoginJSON, _ := json.Marshal(badLoginPayload)
+	req = httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(badLoginJSON))
 	rec = httptest.NewRecorder()
 	handler.AuthUser(rec, req)
 
@@ -139,9 +165,12 @@ func TestAuthFlow(t *testing.T) {
 	}
 
 	// 5. Login with non-existing user
-	nonExistingCreds := base64.StdEncoding.EncodeToString([]byte("nonexistent:password"))
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Basic "+nonExistingCreds)
+	nonExistingPayload := domain.JwtRequest{
+		Login:    "nonexistent",
+		Password: "password",
+	}
+	nonExistingJSON, _ := json.Marshal(nonExistingPayload)
+	req = httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(nonExistingJSON))
 	rec = httptest.NewRecorder()
 	handler.AuthUser(rec, req)
 
@@ -149,28 +178,28 @@ func TestAuthFlow(t *testing.T) {
 		t.Errorf("Expected status 401 Unauthorized on non-existing user, got %d", rec.Code)
 	}
 
-	// 6. Test Middleware with valid auth
+	// 6. Test Middleware with valid Bearer auth
 	protectedHandler := authenticator.Middleware(&dummyHandler{})
 	req = httptest.NewRequest(http.MethodPost, "/game/test-uuid", nil)
-	req.Header.Set("Authorization", "Basic "+creds)
+	req.Header.Set("Authorization", "Bearer "+jwtResp.AccessToken)
 	rec = httptest.NewRecorder()
 	protectedHandler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("Expected middleware to allow request with correct auth, got status %d", rec.Code)
+		t.Errorf("Expected middleware to allow request with valid Bearer auth, got status %d", rec.Code)
 	}
 	if rec.Body.String() != "ok" {
 		t.Errorf("Expected response body to be 'ok', got '%s'", rec.Body.String())
 	}
 
-	// 7. Test Middleware with invalid auth
+	// 7. Test Middleware with invalid Bearer token
 	req = httptest.NewRequest(http.MethodPost, "/game/test-uuid", nil)
-	req.Header.Set("Authorization", "Basic "+badCreds)
+	req.Header.Set("Authorization", "Bearer invalid-tampered-token")
 	rec = httptest.NewRecorder()
 	protectedHandler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("Expected middleware to block request with incorrect auth, got status %d", rec.Code)
+		t.Errorf("Expected middleware to block request with invalid Bearer token, got status %d", rec.Code)
 	}
 
 	// 8. Test Middleware with missing auth
@@ -212,12 +241,72 @@ func TestAuthFlow(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("Expected GetUser 404 Not Found, got status %d", rec.Code)
 	}
+
+	// 12. Test GetUserByToken (GET /user with Bearer token)
+	getUserByTokenHandler := authenticator.Middleware(http.HandlerFunc(handler.GetUserByToken))
+	req = httptest.NewRequest(http.MethodGet, "/user", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtResp.AccessToken)
+	rec = httptest.NewRecorder()
+	getUserByTokenHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected GetUserByToken 200 OK, got %d", rec.Code)
+	}
+	var tokenUserResp web.UserResponse
+	if err := json.NewDecoder(rec.Body).Decode(&tokenUserResp); err != nil {
+		t.Fatalf("Failed to decode GetUserByToken response: %v", err)
+	}
+	if tokenUserResp.UUID != savedUser.UUID || tokenUserResp.Login != savedUser.Login {
+		t.Errorf("GetUserByToken returned %+v, expected UUID %s and Login %s", tokenUserResp, savedUser.UUID, savedUser.Login)
+	}
+
+	// 13. Test UpdateAccessToken (/refresh-acc)
+	refPayload := web.RefreshJwtRequest{RefreshToken: jwtResp.RefreshToken}
+	refJSON, _ := json.Marshal(refPayload)
+	req = httptest.NewRequest(http.MethodPost, "/refresh-acc", bytes.NewBuffer(refJSON))
+	rec = httptest.NewRecorder()
+	handler.UpdateAccessToken(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected UpdateAccessToken 200 OK, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var refreshedAccResp domain.JwtResponse
+	if err := json.NewDecoder(rec.Body).Decode(&refreshedAccResp); err != nil {
+		t.Fatalf("Failed to decode UpdateAccessToken response: %v", err)
+	}
+	if refreshedAccResp.AccessToken == "" {
+		t.Errorf("Expected new non-empty AccessToken")
+	}
+	if refreshedAccResp.RefreshToken != jwtResp.RefreshToken {
+		t.Errorf("Expected preserved RefreshToken %s, got %s", jwtResp.RefreshToken, refreshedAccResp.RefreshToken)
+	}
+
+	// 14. Test UpdateRefreshToken (/refresh-ref)
+	req = httptest.NewRequest(http.MethodPost, "/refresh-ref", bytes.NewBuffer(refJSON))
+	rec = httptest.NewRecorder()
+	handler.UpdateRefreshToken(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected UpdateRefreshToken 200 OK, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var refreshedRefResp domain.JwtResponse
+	if err := json.NewDecoder(rec.Body).Decode(&refreshedRefResp); err != nil {
+		t.Fatalf("Failed to decode UpdateRefreshToken response: %v", err)
+	}
+	if refreshedRefResp.AccessToken == "" {
+		t.Errorf("Expected new non-empty AccessToken")
+	}
+	if refreshedRefResp.RefreshToken == "" {
+		t.Errorf("Expected new non-empty RefreshToken")
+	}
 }
 
 func TestAuthEdgeCases(t *testing.T) {
 	userSvc := &MockUserService{users: make(map[string]domain.User)}
-	authSvc := &domain.AuthService{UserSvc: userSvc}
+	jwtProvider := setupWebJwtProvider(t)
+	authSvc := &domain.AuthService{UserSvc: userSvc, JwtProvider: jwtProvider}
 	handler := web.NewUserHandler(authSvc)
+	authenticator := web.NewUserAuthenticator(jwtProvider)
 
 	// 1. Malformed JSON body in signup
 	req := httptest.NewRequest(http.MethodPost, "/signup", bytes.NewBuffer([]byte(`{"login": "testuser",`)))
@@ -227,38 +316,77 @@ func TestAuthEdgeCases(t *testing.T) {
 		t.Errorf("Expected status 400 Bad Request on malformed JSON body in signup, got %d", rec.Code)
 	}
 
-	// 2. Invalid Base64 in Authorization header
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Basic invalid-base64-!!!")
+	// 2. Malformed JSON body in login
+	req = httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer([]byte(`{"login": "testuser"`)))
 	rec = httptest.NewRecorder()
 	handler.AuthUser(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 Unauthorized on invalid Base64 in Auth header, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400 Bad Request on malformed JSON body in login, got %d", rec.Code)
 	}
 
-	// 3. Invalid Auth Scheme (e.g. Bearer)
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Bearer someToken123")
+	// 3. Non-Bearer authorization header in Middleware
+	protectedHandler := authenticator.Middleware(&dummyHandler{})
+	req = httptest.NewRequest(http.MethodPost, "/game/test-uuid", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	rec = httptest.NewRecorder()
-	handler.AuthUser(rec, req)
+	protectedHandler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 Unauthorized on non-Basic Auth Scheme, got %d", rec.Code)
+		t.Errorf("Expected status 401 Unauthorized on non-Bearer Authorization scheme, got %d", rec.Code)
 	}
 
-	// 4. Invalid credentials format (no colon inside decoded credentials)
-	badEncoding := base64.StdEncoding.EncodeToString([]byte("userwithoutcolon"))
-	req = httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.Header.Set("Authorization", "Basic "+badEncoding)
+	// 4. Malformed Authorization header in Middleware
+	req = httptest.NewRequest(http.MethodPost, "/game/test-uuid", nil)
+	req.Header.Set("Authorization", "Bearer")
 	rec = httptest.NewRecorder()
-	handler.AuthUser(rec, req)
+	protectedHandler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 Unauthorized on credentials format with no colon, got %d", rec.Code)
+		t.Errorf("Expected status 401 Unauthorized on empty Bearer token, got %d", rec.Code)
 	}
 
-	// 5. Test routing with wrong HTTP Method
+	// 5. UpdateAccessToken with malformed JSON body
+	req = httptest.NewRequest(http.MethodPost, "/refresh-acc", bytes.NewBuffer([]byte(`{"refresh_token":`)))
+	rec = httptest.NewRecorder()
+	handler.UpdateAccessToken(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400 Bad Request on malformed JSON in UpdateAccessToken, got %d", rec.Code)
+	}
+
+	// 6. UpdateAccessToken with invalid refresh token
+	invRefReq, _ := json.Marshal(web.RefreshJwtRequest{RefreshToken: "invalid-token"})
+	req = httptest.NewRequest(http.MethodPost, "/refresh-acc", bytes.NewBuffer(invRefReq))
+	rec = httptest.NewRecorder()
+	handler.UpdateAccessToken(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401 Unauthorized on invalid token in UpdateAccessToken, got %d", rec.Code)
+	}
+
+	// 7. UpdateRefreshToken with malformed JSON body
+	req = httptest.NewRequest(http.MethodPost, "/refresh-ref", bytes.NewBuffer([]byte(`{"refresh_token":`)))
+	rec = httptest.NewRecorder()
+	handler.UpdateRefreshToken(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400 Bad Request on malformed JSON in UpdateRefreshToken, got %d", rec.Code)
+	}
+
+	// 8. UpdateRefreshToken with invalid refresh token
+	req = httptest.NewRequest(http.MethodPost, "/refresh-ref", bytes.NewBuffer(invRefReq))
+	rec = httptest.NewRecorder()
+	handler.UpdateRefreshToken(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401 Unauthorized on invalid token in UpdateRefreshToken, got %d", rec.Code)
+	}
+
+	// 9. GetUserByToken with missing UUID in context
+	req = httptest.NewRequest(http.MethodGet, "/user", nil)
+	rec = httptest.NewRecorder()
+	handler.GetUserByToken(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 on missing UUID context in GetUserByToken, got %d", rec.Code)
+	}
+
+	// 10. Test routing with wrong HTTP Method
 	mux := di.NewServeMux()
 	gameHandler := web.NewGameHandler(nil)
-	authenticator := web.NewUserAuthenticator(authSvc)
 	di.RegisterRoute(mux, gameHandler, handler, authenticator)
 
 	req = httptest.NewRequest(http.MethodGet, "/signup", nil)
@@ -273,5 +401,12 @@ func TestAuthEdgeCases(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status 405 Method Not Allowed on GET /login, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/refresh-acc", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405 Method Not Allowed on GET /refresh-acc, got %d", rec.Code)
 	}
 }
