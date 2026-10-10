@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type MockRepo struct {
@@ -634,6 +635,39 @@ func TestGameServiceErrorBranches(t *testing.T) {
 	_, err = listErrService.GetCurrentGames(ctx, "", "p1")
 	if err == nil {
 		t.Error("Expected GetCurrentGames to fail on repo GetCurrentGames error")
+	}
+
+	_, err = listErrService.GetFinishedGames(ctx, "p1")
+	if err == nil {
+		t.Error("Expected GetFinishedGames to fail on repo GetFinishedGames error")
+	}
+}
+
+func TestGetFinishedGames(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	repo := &MockRepo{
+		sessions: map[string]*Session{
+			"g1": {UUID: "g1", Player1UUID: "p1", Player2UUID: "p2", Status: Win, WinnerUUID: "p1", CreatedAt: now},
+			"g2": {UUID: "g2", Player1UUID: "p1", Player2UUID: "p2", Status: Draw, CreatedAt: now},
+			"g3": {UUID: "g3", Player1UUID: "p1", Player2UUID: "p2", Status: Waiting, CreatedAt: now},
+		},
+	}
+	svc := NewGameService(repo, Cross, Nought)
+
+	// 1. Success
+	games, err := svc.GetFinishedGames(ctx, "p1")
+	if err != nil {
+		t.Fatalf("GetFinishedGames failed: %v", err)
+	}
+	if len(games) != 2 {
+		t.Fatalf("Expected 2 finished games, got %d", len(games))
+	}
+
+	// 2. Empty playerUUID returns IncorrectCredsError
+	_, err = svc.GetFinishedGames(ctx, "")
+	if err == nil {
+		t.Error("Expected error when playerUUID is empty")
 	}
 }
 

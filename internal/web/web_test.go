@@ -545,7 +545,7 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 	mux.Handle("GET /game/current", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
 	mux.Handle("GET /game/current/{uuid}", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
 	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(handler.PostGame)))
-
+	mux.Handle("GET /game/finished", auth.Middleware(http.HandlerFunc(handler.GetFinishedGames)))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
@@ -579,4 +579,74 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("Expected 500 for PostGame error, got %d", resp.StatusCode)
 	}
+	resp, _ = http.Get(ts.URL + "/game/finished")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for GetFinishedGames error, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetFinishedGamesHandler(t *testing.T) {
+	ctx := context.Background()
+	repo := &MockRepo{}
+	svc := domain.NewGameService(repo, domain.Cross, domain.Nought)
+	handler := NewGameHandler(svc)
+	auth := &MockAuthenticator{}
+
+	now := time.Now().Truncate(time.Millisecond)
+	repo.Save(ctx, &domain.Session{
+		UUID:        "finished-1",
+		Player1UUID: "test-user-uuid",
+		Player2UUID: "other-user",
+		Status:      domain.Win,
+		WinnerUUID:  "test-user-uuid",
+		CreatedAt:   now,
+	})
+	repo.Save(ctx, &domain.Session{
+		UUID:        "active-1",
+		Player1UUID: "test-user-uuid",
+		Player2UUID: "other-user",
+		Status:      domain.Waiting,
+		CreatedAt:   now,
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /game/finished", auth.Middleware(http.HandlerFunc(handler.GetFinishedGames)))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 1. Success 200 with finished games
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/finished", nil)
+	req.Header.Set("X-Test-User", "test-user-uuid")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var games []GameModel
+	if err := json.NewDecoder(resp.Body).Decode(&games); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if len(games) != 1 {
+		t.Fatalf("Expected 1 finished game, got %d", len(games))
+	}
+	if games[0].UUID != "finished-1" {
+		t.Errorf("Expected UUID 'finished-1', got '%s'", games[0].UUID)
+	}
+	if games[0].CreatedAt.IsZero() {
+		t.Errorf("Expected non-zero CreatedAt in returned game")
+	}
+
+	// 2. Unauthorized when user context is empty
+	unauthReq := httptest.NewRequest(http.MethodGet, "/game/finished", nil)
+	rec := httptest.NewRecorder()
+	handler.GetFinishedGames(rec, unauthReq)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized for empty context user, got %d", rec.Code)
+	}
+
 }

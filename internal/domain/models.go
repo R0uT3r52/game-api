@@ -1,6 +1,9 @@
 package domain
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // Cell states
 const (
@@ -42,6 +45,7 @@ type Session struct {
 	WinnerUUID  string
 	Player1Sign int
 	Player2Sign int
+	CreatedAt   time.Time
 }
 
 type GameService struct {

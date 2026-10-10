@@ -3,9 +3,11 @@ package datasource
 import (
 	"game-api/internal/domain"
 	"testing"
+	"time"
 )
 
 func TestDatasourceMappers(t *testing.T) {
+	now := time.Now()
 	session := &domain.Session{
 		UUID:            "game-uuid",
 		F:               domain.Field{Grid: [3][3]int{{1, 0, 0}, {0, 2, 0}, {0, 0, 0}}},
@@ -17,15 +19,16 @@ func TestDatasourceMappers(t *testing.T) {
 		WinnerUUID:      "p1",
 		Player1Sign:     1,
 		Player2Sign:     2,
+		CreatedAt:       now,
 	}
 
 	model := FromDomain(session)
-	if model.UUID != session.UUID || *model.Player1UUID != "p1" || *model.Player2UUID != "p2" || *model.WinnerUUID != "p1" {
+	if model.UUID != session.UUID || *model.Player1UUID != "p1" || *model.Player2UUID != "p2" || *model.WinnerUUID != "p1" || !model.CreatedAt.Equal(now) {
 		t.Errorf("FromDomain failed: %+v", model)
 	}
 
 	domainConverted := ToDomain(&model)
-	if domainConverted.UUID != session.UUID || domainConverted.F.Grid != session.F.Grid {
+	if domainConverted.UUID != session.UUID || domainConverted.F.Grid != session.F.Grid || !domainConverted.CreatedAt.Equal(now) {
 		t.Errorf("ToDomain failed: %+v", domainConverted)
 	}
 

@@ -1,6 +1,9 @@
 package web
 
-import "game-api/internal/domain"
+import (
+	"game-api/internal/domain"
+	"time"
+)
 
 type GameModel struct {
 	UUID            string    `json:"uuid"`
@@ -13,6 +16,7 @@ type GameModel struct {
 	WinnerUUID      string    `json:"winner_uuid,omitempty"`
 	Player1Sign     int       `json:"player1_sign"`
 	Player2Sign     int       `json:"player2_sign"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type CreateGameRequest struct {

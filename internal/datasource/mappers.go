@@ -32,6 +32,7 @@ func FromDomain(game *domain.Session) GameModel {
 		Player1Sign:     game.Player1Sign,
 		Player2Sign:     game.Player2Sign,
 		ChangedAt:       time.Now(),
+		CreatedAt:       game.CreatedAt,
 	}
 }
 
@@ -65,6 +66,7 @@ func ToDomain(item *GameModel) *domain.Session {
 		WinnerUUID:      w,
 		Player1Sign:     item.Player1Sign,
 		Player2Sign:     item.Player2Sign,
+		CreatedAt:       item.CreatedAt,
 	}
 }
 

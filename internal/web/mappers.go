@@ -16,6 +16,7 @@ func (g *GameModel) WebToDomain() *domain.Session {
 		WinnerUUID:      g.WinnerUUID,
 		Player1Sign:     g.Player1Sign,
 		Player2Sign:     g.Player2Sign,
+		CreatedAt:       g.CreatedAt,
 	}
 }
 
@@ -30,4 +31,5 @@ func (g *GameModel) DomainToWeb(s *domain.Session) {
 	g.WinnerUUID = s.WinnerUUID
 	g.Player1Sign = s.Player1Sign
 	g.Player2Sign = s.Player2Sign
+	g.CreatedAt = s.CreatedAt
 }

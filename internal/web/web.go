@@ -99,7 +99,8 @@ func (h *GameHandler) GetFinishedGames(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := h.Service.GetFinishedGames(reqCtx, playerUUID)
 	if err != nil {
-		if errors.Is(err, &domain.IncorrectCredsError{}) {
+		var incCreds *domain.IncorrectCredsError
+		if errors.As(err, &incCreds) {
 			log.Printf("Incorrect playerUUID")
 			http.Error(w, "Unauthorized playerUUID", http.StatusUnauthorized)
 			return
