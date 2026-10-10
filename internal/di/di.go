@@ -28,21 +28,22 @@ func RegisterRoute(mux *http.ServeMux, h web.GameHandlerInterface, u web.UserHan
 	authGetCurrentGame := http.HandlerFunc(h.GetCurrentGame)
 	authGetUser := http.HandlerFunc(u.GetUser)
 	authGetUserByToken := http.HandlerFunc(u.GetUserByToken)
-	authRefreshRefTkn := http.HandlerFunc(u.UpdateRefreshToken)
+	authGetFinishedGames := http.HandlerFunc(h.GetFinishedGames)
 
 	mux.Handle("POST /game/{uuid}", a.Middleware(authPostGame))
 	mux.Handle("POST /game/new", a.Middleware(authCreateGame))
 	mux.Handle("GET /games/available", a.Middleware(authListGames))
 	mux.Handle("POST /game/connect", a.Middleware(authConnectGame))
 	mux.Handle("GET /game/current", a.Middleware(authGetCurrentGame))
+	mux.Handle("GET /game/finished", a.Middleware(authGetFinishedGames))
 	mux.Handle("GET /game/current/{uuid}", a.Middleware(authGetCurrentGame)) // uuid as an optional path parameter
 	mux.Handle("GET /user/{uuid}", a.Middleware(authGetUser))
 	mux.Handle("GET /user", a.Middleware(authGetUserByToken))
-	mux.Handle("POST /refresh-ref", a.Middleware(authRefreshRefTkn))
 
 	mux.HandleFunc("POST /signup", u.RegisterUser)
 	mux.HandleFunc("POST /login", u.AuthUser)
 	mux.HandleFunc("POST /refresh-acc", u.UpdateAccessToken)
+	mux.HandleFunc("POST /refresh-ref", u.UpdateRefreshToken)
 }
 
 func NewDB(lc fx.Lifecycle) (*pgxpool.Pool, error) {

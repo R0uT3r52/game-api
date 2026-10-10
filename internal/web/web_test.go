@@ -86,6 +86,20 @@ func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID str
 	return ans, nil
 }
 
+func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
+	ans := make([]domain.Session, 0)
+
+	m.Data.Range(func(key, value any) bool {
+		s := value.(domain.Session)
+		if (s.Player1UUID == playerUUID || s.Player2UUID == playerUUID) && s.Status != domain.Waiting {
+			ans = append(ans, s)
+		}
+		return true
+	})
+
+	return ans, nil
+}
+
 func (m *MockRepo) GetUser(ctx context.Context, uuid string) (*domain.User, error) {
 	return nil, nil
 }
@@ -510,6 +524,9 @@ func (m *MockErrGameService) GetAvailableGames(ctx context.Context) ([]domain.Se
 	return nil, errors.New("service err")
 }
 func (m *MockErrGameService) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
 	return nil, errors.New("service err")
 }
 func (m *MockErrGameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {

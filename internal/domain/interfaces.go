@@ -7,6 +7,7 @@ type GameRepositoryInterface interface {
 	Load(ctx context.Context, uuid string) (*Session, error)
 	ListAvailable(ctx context.Context) ([]Session, error)
 	GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error)
+	GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error)
 }
 
 type GameServiceInterface interface {
@@ -18,6 +19,7 @@ type GameServiceInterface interface {
 	GetAvailableGames(ctx context.Context) ([]Session, error)
 	GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error)
 	Connect(ctx context.Context, p2UUID, gameUUID string) error
+	GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error)
 }
 
 type UserServiceInterface interface {

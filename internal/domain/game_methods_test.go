@@ -60,6 +60,22 @@ func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID str
 	return ans, nil
 }
 
+func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+
+	ans := make([]Session, 0)
+
+	for _, s := range m.sessions {
+		if (s.Player1UUID == playerUUID || s.Player2UUID == playerUUID) && s.Status != Waiting {
+			ans = append(ans, *s)
+		}
+	}
+
+	return ans, nil
+}
+
 func TestValidateField(t *testing.T) {
 	ctx := context.Background()
 

@@ -26,6 +26,7 @@ type GameModel struct {
 	Player1Sign     int       `db:"player1_sign"`
 	Player2Sign     int       `db:"player2_sign"`
 	ChangedAt       time.Time `db:"changed_at"`
+	CreatedAt       time.Time `db:"created_at"`
 }
 
 // GetUser(uuid string) (*User, error)

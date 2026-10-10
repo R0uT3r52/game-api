@@ -92,6 +92,34 @@ func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webModels)
 }
 
+func (h *GameHandler) GetFinishedGames(w http.ResponseWriter, r *http.Request) {
+
+	reqCtx := r.Context()
+	playerUUID := UserUUIDFromContext(reqCtx)
+
+	sessions, err := h.Service.GetFinishedGames(reqCtx, playerUUID)
+	if err != nil {
+		if errors.Is(err, &domain.IncorrectCredsError{}) {
+			log.Printf("Incorrect playerUUID")
+			http.Error(w, "Unauthorized playerUUID", http.StatusUnauthorized)
+			return
+		} else {
+			log.Printf("Internal error: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	ans := make([]GameModel, len(sessions))
+	for i := range ans {
+		ans[i].DomainToWeb(&sessions[i])
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(ans)
+}
+
 func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
 
 	var req ConnectGameRequest

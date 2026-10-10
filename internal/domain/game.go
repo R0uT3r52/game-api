@@ -179,6 +179,19 @@ func (g *GameService) GetCurrentGames(ctx context.Context, gameUUID, playerUUID 
 	return ans, nil
 }
 
+func (g *GameService) GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error) {
+	if playerUUID == "" {
+		return nil, &IncorrectCredsError{}
+	}
+
+	ans, err := g.repo.GetFinishedGames(ctx, playerUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ans, nil
+}
+
 func (g *GameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()

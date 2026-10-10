@@ -39,6 +39,24 @@ services:
     networks:
       - app-network
 
+  pgweb:
+    container_name: pgweb
+    image: sosedoff/pgweb:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable
+    ports:
+      - "8081:8081"
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+
 volumes:
   postgres_data:
 

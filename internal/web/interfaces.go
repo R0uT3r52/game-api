@@ -10,6 +10,7 @@ type GameHandlerInterface interface {
 	ListGames(w http.ResponseWriter, r *http.Request)
 	ConnectGame(w http.ResponseWriter, r *http.Request)
 	GetCurrentGame(w http.ResponseWriter, r *http.Request)
+	GetFinishedGames(w http.ResponseWriter, r *http.Request)
 }
 
 type UserHandlerInterface interface {

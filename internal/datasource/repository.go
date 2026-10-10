@@ -95,6 +95,28 @@ func (r *GameRepository) GetCurrentGames(ctx context.Context, gameUUID, playerUU
 	return []domain.Session{*session}, nil
 }
 
+func (r *GameRepository) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
+
+	sql := `SELECT * FROM games WHERE (player1_uuid=$1 OR player2_uuid=$1) AND (status=$2 OR status=$3);`
+
+	rows, err := r.Data.Games.Query(ctx, sql, playerUUID, domain.Draw, domain.Win)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := pgx.CollectRows(rows, pgx.RowToStructByName[GameModel])
+	if err != nil {
+		return nil, err
+	}
+
+	ans := make([]domain.Session, 0, len(data))
+	for _, elem := range data {
+		ans = append(ans, *ToDomain(&elem))
+	}
+
+	return ans, nil
+}
+
 func (r *GameRepository) Save(ctx context.Context, game *domain.Session) error {
 
 	gameModel := FromDomain(game)
