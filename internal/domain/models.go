@@ -48,6 +48,13 @@ type Session struct {
 	CreatedAt   time.Time
 }
 
+type LeaderBoard struct {
+	// UUID        string
+	PlayerUUID  string
+	PlayerLogin string
+	WinRate     float64
+}
+
 type GameService struct {
 	repo       GameRepositoryInterface
 	PlayerSign int

@@ -19,6 +19,13 @@ type GameModel struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type LeaderBoardModel struct {
+	// UUID        string  `db:"uuid"`
+	PlayerUUID  string  `json:"uuid"`
+	PlayerLogin string  `json:"login"`
+	WinRate     float64 `json:"winrate"`
+}
+
 type CreateGameRequest struct {
 	IsWithBot bool `json:"is_with_bot"`
 }

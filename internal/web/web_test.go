@@ -86,6 +86,10 @@ func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID str
 	return ans, nil
 }
 
+func (m *MockRepo) GetLeaderboard(ctx context.Context, limit int64) ([]domain.LeaderBoard, error) {
+	return nil, nil
+}
+
 func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
 	ans := make([]domain.Session, 0)
 
@@ -527,6 +531,9 @@ func (m *MockErrGameService) GetCurrentGames(ctx context.Context, gameUUID, play
 	return nil, errors.New("service err")
 }
 func (m *MockErrGameService) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
+	return nil, errors.New("service err")
+}
+func (m *MockErrGameService) GetLeaderboard(ctx context.Context, limit int64) ([]domain.LeaderBoard, error) {
 	return nil, errors.New("service err")
 }
 func (m *MockErrGameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {

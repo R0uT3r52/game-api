@@ -29,6 +29,13 @@ type GameModel struct {
 	CreatedAt       time.Time `db:"created_at"`
 }
 
+type LeaderBoardModel struct {
+	// UUID        string  `db:"uuid"`
+	PlayerUUID  string  `db:"player_uuid"`
+	PlayerLogin string  `db:"player_login"`
+	WinRate     float64 `db:"winrate"`
+}
+
 // GetUser(uuid string) (*User, error)
 // SaveUser() error
 type UserModel struct {

@@ -41,6 +41,47 @@ func NewGameRepo(db *pgxpool.Pool) *GameRepository {
 	}
 }
 
+func (r *GameRepository) GetLeaderboard(ctx context.Context, limit int64) ([]domain.LeaderBoard, error) {
+
+	sqlAll := `
+		WITH user_games AS (
+			SELECT u.uuid AS player_uuid, u.login AS player_login, g.winner_uuid, g.status
+			FROM users u
+			JOIN games g ON u.uuid=g.player1_uuid OR u.uuid=g.player2_uuid
+			WHERE g.status=$1 OR g.status=$2
+		)
+
+		SELECT player_uuid, player_login,
+		ROUND(
+			COUNT(CASE WHEN winner_uuid = player_uuid THEN 1 END)::NUMERIC /
+			COALESCE(NULLIF(COUNT(CASE WHEN winner_uuid != player_uuid OR winner_uuid IS NULL THEN 1 END), 0), 1),
+			2
+		)::FLOAT AS winrate
+		FROM user_games
+		GROUP BY player_uuid, player_login
+		ORDER BY winrate DESC NULLS LAST
+		LIMIT $3;
+	`
+
+	rows, err := r.Data.Games.Query(ctx, sqlAll, domain.Win, domain.Draw, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := pgx.CollectRows(rows, pgx.RowToStructByName[LeaderBoardModel])
+	if err != nil {
+		return nil, err
+	}
+
+	ans := make([]domain.LeaderBoard, 0, len(data))
+	for i := range data {
+		item := LeaderboardToDomain(&data[i])
+		ans = append(ans, *item)
+	}
+
+	return ans, nil
+}
+
 func (r *GameRepository) ListAvailable(ctx context.Context) ([]domain.Session, error) {
 	// ctx := context.Background()
 	ans := make([]domain.Session, 0)
@@ -97,7 +138,7 @@ func (r *GameRepository) GetCurrentGames(ctx context.Context, gameUUID, playerUU
 
 func (r *GameRepository) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
 
-	sql := `SELECT * FROM games WHERE (player1_uuid=$1 OR player2_uuid=$1) AND (status=$2 OR status=$3);`
+	sql := `SELECT * FROM games WHERE (player1_uuid=$1 OR player2_uuid=$1) AND (status=$2 OR status=$3) ORDER BY created_at DESC;`
 
 	rows, err := r.Data.Games.Query(ctx, sql, playerUUID, domain.Draw, domain.Win)
 	if err != nil {

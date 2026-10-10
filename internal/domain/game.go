@@ -179,6 +179,19 @@ func (g *GameService) GetCurrentGames(ctx context.Context, gameUUID, playerUUID 
 	return ans, nil
 }
 
+func (g *GameService) GetLeaderboard(ctx context.Context, limit int64) ([]LeaderBoard, error) {
+	if limit < 0 {
+		return nil, ErrIncorrectLimit
+	}
+
+	ans, err := g.repo.GetLeaderboard(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return ans, nil
+}
+
 func (g *GameService) GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error) {
 	if playerUUID == "" {
 		return nil, &IncorrectCredsError{}

@@ -86,3 +86,11 @@ func UserFromDomain(item *domain.User) UserModel {
 		CreatedAt:    time.Now(),
 	}
 }
+
+func LeaderboardToDomain(item *LeaderBoardModel) *domain.LeaderBoard {
+	return &domain.LeaderBoard{
+		PlayerUUID:  item.PlayerUUID,
+		PlayerLogin: item.PlayerLogin,
+		WinRate:     item.WinRate,
+	}
+}

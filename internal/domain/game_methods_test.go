@@ -77,6 +77,10 @@ func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]S
 	return ans, nil
 }
 
+func (m *MockRepo) GetLeaderboard(ctx context.Context, limit int64) ([]LeaderBoard, error) {
+	return nil, nil
+}
+
 func TestValidateField(t *testing.T) {
 	ctx := context.Background()
 

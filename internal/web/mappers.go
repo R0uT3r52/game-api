@@ -33,3 +33,9 @@ func (g *GameModel) DomainToWeb(s *domain.Session) {
 	g.Player2Sign = s.Player2Sign
 	g.CreatedAt = s.CreatedAt
 }
+
+func (l *LeaderBoardModel) DomainToWeb(ls *domain.LeaderBoard) {
+	l.PlayerUUID = ls.PlayerUUID
+	l.PlayerLogin = ls.PlayerLogin
+	l.WinRate = ls.WinRate
+}

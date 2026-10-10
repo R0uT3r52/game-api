@@ -6,6 +6,7 @@ import (
 	"game-api/internal/domain"
 	"log"
 	"net/http"
+	"strconv"
 )
 
 func NewGameHandler(s domain.GameServiceInterface) *GameHandler {
@@ -114,6 +115,52 @@ func (h *GameHandler) GetFinishedGames(w http.ResponseWriter, r *http.Request) {
 	ans := make([]GameModel, len(sessions))
 	for i := range ans {
 		ans[i].DomainToWeb(&sessions[i])
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(ans)
+}
+
+func (h *GameHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+
+	queryParams := r.URL.Query()
+
+	limitq := queryParams.Get("limit")
+	if limitq == "" {
+		limitq = queryParams.Get("n")
+	}
+	if limitq == "" {
+		limitq = queryParams.Get("N")
+	}
+	if limitq == "" {
+		limitq = "50"
+	}
+	limit, err := strconv.ParseInt(limitq, 10, 32)
+
+	if err != nil {
+		log.Printf("Incorrect limit value in query: %v", err)
+		http.Error(w, "Invalid limit parameter", http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.Service.GetLeaderboard(r.Context(), limit)
+	if err != nil {
+		if errors.Is(err, domain.ErrIncorrectLimit) {
+			log.Printf("Incorrect limit value: %d", limit)
+			http.Error(w, "Invalid limit parameter", http.StatusBadRequest)
+			return
+		} else {
+			log.Printf("Internal error: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	ans := make([]LeaderBoardModel, len(result))
+
+	for i := range result {
+		ans[i].DomainToWeb(&result[i])
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -45,8 +45,9 @@ func (e *InvalidTokenError) Error() string {
 type JwtSecretError struct{}
 
 func (e *JwtSecretError) Error() string {
-	return fmt.Sprintf("unable to find JWT_SECRET env variable")
+	return "unable to find JWT_SECRET env variable"
 }
 
 var ErrGameAlreadyStarted = &ValidationError{Message: "Game already started with another player"}
 var ErrUserAlreadyInGame = &ValidationError{Message: "User already in this game"}
+var ErrIncorrectLimit = &ValidationError{Message: "Incorrect limit value"}

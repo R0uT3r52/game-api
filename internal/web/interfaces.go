@@ -11,6 +11,7 @@ type GameHandlerInterface interface {
 	ConnectGame(w http.ResponseWriter, r *http.Request)
 	GetCurrentGame(w http.ResponseWriter, r *http.Request)
 	GetFinishedGames(w http.ResponseWriter, r *http.Request)
+	GetLeaderboard(w http.ResponseWriter, r *http.Request)
 }
 
 type UserHandlerInterface interface {

@@ -8,6 +8,7 @@ type GameRepositoryInterface interface {
 	ListAvailable(ctx context.Context) ([]Session, error)
 	GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error)
 	GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error)
+	GetLeaderboard(ctx context.Context, limit int64) ([]LeaderBoard, error)
 }
 
 type GameServiceInterface interface {
@@ -18,8 +19,9 @@ type GameServiceInterface interface {
 	CreateGame(ctx context.Context, p1 string, withBot bool) (id string, err error)
 	GetAvailableGames(ctx context.Context) ([]Session, error)
 	GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error)
-	Connect(ctx context.Context, p2UUID, gameUUID string) error
 	GetFinishedGames(ctx context.Context, playerUUID string) ([]Session, error)
+	GetLeaderboard(ctx context.Context, limit int64) ([]LeaderBoard, error)
+	Connect(ctx context.Context, p2UUID, gameUUID string) error
 }
 
 type UserServiceInterface interface {
