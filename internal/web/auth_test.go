@@ -53,7 +53,7 @@ func (h *dummyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	_, _ = w.Write([]byte("ok"))
 }
 
 func setupWebJwtProvider(t *testing.T) domain.JwtProviderInterface {
@@ -220,7 +220,9 @@ func TestAuthFlow(t *testing.T) {
 		t.Errorf("Expected GetUser 200 OK, got status %d", rec.Code)
 	}
 	var uResp web.UserResponse
-	json.NewDecoder(rec.Body).Decode(&uResp)
+	if err := json.NewDecoder(rec.Body).Decode(&uResp); err != nil {
+		t.Fatalf("Failed to decode user response: %v", err)
+	}
 	if uResp.Login != "testuser" || uResp.UUID != savedUser.UUID {
 		t.Errorf("GetUser returned unexpected user: %+v", uResp)
 	}

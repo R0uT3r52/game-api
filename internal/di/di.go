@@ -2,6 +2,7 @@ package di
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"game-api/internal/datasource"
 	"game-api/internal/domain"
@@ -81,7 +82,11 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 				return err
 			}
 			fmt.Println("Starting HTTP server at", srv.Addr)
-			go srv.Serve(ln)
+			go func() {
+				if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					fmt.Printf("HTTP server error: %v\n", err)
+				}
+			}()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {

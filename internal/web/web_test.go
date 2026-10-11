@@ -22,12 +22,6 @@ type MockRepo struct {
 	LastLeaderboardLimit int64
 }
 
-type notFoundError struct{}
-
-func (e *notFoundError) Error() string {
-	return "Game not found"
-}
-
 func (m *MockRepo) Save(ctx context.Context, game *domain.Session) error {
 	if m.Latency > 0 {
 		time.Sleep(m.Latency)
@@ -152,12 +146,14 @@ func TestRace_ConcurrentConnect(t *testing.T) {
 
 	gameUUID := "race-connect-game"
 
-	repo.Save(ctx, &domain.Session{
+	if err := repo.Save(ctx, &domain.Session{
 		UUID:        gameUUID,
 		Status:      domain.Waiting,
 		Player1UUID: "host-player",
 		Player1Sign: domain.Cross,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
 
 	const totalPlayers = 10
 	var wg sync.WaitGroup
@@ -188,14 +184,17 @@ func TestRace_ConcurrentConnect(t *testing.T) {
 				t.Errorf("Error on req: %v", err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			mu.Lock()
-			if resp.StatusCode == http.StatusOK {
+			switch resp.StatusCode {
+			case http.StatusOK:
 				successCount++
-			} else if resp.StatusCode == http.StatusBadRequest {
+			case http.StatusBadRequest:
 				rejectCount++
-			} else {
+			default:
 				t.Errorf("Unknow status code: %d", resp.StatusCode)
 			}
 			mu.Unlock()
@@ -232,7 +231,7 @@ func TestRace_ConcurrentMove(t *testing.T) {
 	gameUUID := "race-move-game"
 
 	// Player1 turn
-	repo.Save(ctx, &domain.Session{
+	if err := repo.Save(ctx, &domain.Session{
 		UUID:            gameUUID,
 		Status:          domain.Turn,
 		Player1UUID:     "player-1",
@@ -241,7 +240,9 @@ func TestRace_ConcurrentMove(t *testing.T) {
 		Player1Sign:     domain.Cross,
 		Player2Sign:     domain.Nought,
 		F:               domain.Field{},
-	})
+	}); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
 
 	moveA := domain.Field{Grid: [3][3]int{{domain.Cross, 0, 0}, {0, 0, 0}, {0, 0, 0}}}
 	moveB := domain.Field{Grid: [3][3]int{{0, domain.Cross, 0}, {0, 0, 0}, {0, 0, 0}}}
@@ -273,7 +274,9 @@ func TestRace_ConcurrentMove(t *testing.T) {
 				t.Errorf("Err sending req: %v", err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			mu.Lock()
 			if resp.StatusCode == http.StatusOK {
@@ -316,60 +319,6 @@ func TestRace_ConcurrentMove(t *testing.T) {
 	}
 }
 
-func aiVSai(ts *httptest.Server, repo domain.GameRepositoryInterface, t *testing.T, uuid string) {
-	url := fmt.Sprintf("%s/game/%s", ts.URL, uuid)
-	ctx := context.Background()
-	// Setup game
-	repo.Save(ctx, &domain.Session{
-		UUID:            uuid,
-		Status:          domain.Turn,
-		CurrentTurnUUID: "test-user-uuid",
-		Player1UUID:     "test-user-uuid",
-		Player1Sign:     domain.Cross,
-		IsWithBot:       true,
-		Player2Sign:     domain.Nought,
-	})
-
-	for i := 0; i < 10; i++ {
-		s, _ := repo.Load(ctx, uuid)
-		if s.Status == domain.Win || s.Status == domain.Draw {
-			return
-		}
-
-		// Player (AI for test purposes) move
-		row, col := -1, -1
-	findMove:
-		for r := 0; r < 3; r++ {
-			for c := 0; c < 3; c++ {
-				if s.F.Grid[r][c] == domain.Empty {
-					row, col = r, c
-					break findMove
-				}
-			}
-		}
-		if row == -1 {
-			break
-		}
-		s.F.Grid[row][col] = domain.Cross
-
-		reqBody, _ := json.Marshal(MoveRequest{Field: s.F.Grid})
-		resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
-		if err != nil || resp.StatusCode != http.StatusOK {
-			t.Errorf("Post failed: %v, status: %d", err, resp.StatusCode)
-			return
-		}
-
-		var gameResp GameModel
-		json.NewDecoder(resp.Body).Decode(&gameResp)
-		resp.Body.Close()
-
-		if gameResp.Status == domain.Win || gameResp.Status == domain.Draw {
-			return
-		}
-	}
-	t.Errorf("[UUID: %s] game not ended correctly", uuid)
-}
-
 func TestGameHandlers(t *testing.T) {
 	repo := &MockRepo{}
 	service := domain.NewGameService(repo, domain.Cross, domain.Nought)
@@ -393,8 +342,10 @@ func TestGameHandlers(t *testing.T) {
 		t.Fatalf("CreateGame failed: status %v, err %v", resp.StatusCode, err)
 	}
 	var createResp TokenResponse
-	json.NewDecoder(resp.Body).Decode(&createResp)
-	resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
+		t.Fatalf("Failed to decode create response: %v", err)
+	}
+	_ = resp.Body.Close()
 	if createResp.UUID == "" {
 		t.Fatalf("Expected non-empty game UUID")
 	}
@@ -405,8 +356,10 @@ func TestGameHandlers(t *testing.T) {
 		t.Fatalf("ListGames failed: status %v, err %v", resp.StatusCode, err)
 	}
 	var games []GameModel
-	json.NewDecoder(resp.Body).Decode(&games)
-	resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&games); err != nil {
+		t.Fatalf("Failed to decode games: %v", err)
+	}
+	_ = resp.Body.Close()
 	if len(games) != 1 || games[0].UUID != createResp.UUID {
 		t.Errorf("Expected 1 available game, got %v", len(games))
 	}
@@ -420,7 +373,7 @@ func TestGameHandlers(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("ConnectGame failed: status %v, err %v", resp.StatusCode, err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 4. Duplicate ConnectGame (Game already started)
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(connReq))
@@ -430,7 +383,7 @@ func TestGameHandlers(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request on duplicate connect, got status %v", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 4.1 Self-connect by the creator (host joining own game)
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/game/connect", bytes.NewBuffer(connReq))
@@ -439,7 +392,7 @@ func TestGameHandlers(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request on self-connect, got status %v", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 5. GetCurrentGame
 	// req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", bytes.NewBuffer(connReq))
@@ -449,8 +402,10 @@ func TestGameHandlers(t *testing.T) {
 		t.Fatalf("GetCurrentGame failed: status %v, err %v", resp.StatusCode, err)
 	}
 	var currentGames []GameModel
-	json.NewDecoder(resp.Body).Decode(&currentGames)
-	resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&currentGames); err != nil {
+		t.Fatalf("Failed to decode current games: %v", err)
+	}
+	_ = resp.Body.Close()
 	if len(currentGames) != 1 {
 		t.Errorf("Expected 1 active game, got %v", len(currentGames))
 	}
@@ -487,11 +442,7 @@ func TestGameHandlerErrorBranches(t *testing.T) {
 		t.Errorf("Expected 400 Bad Request on invalid JSON in ConnectGame, got %d", resp.StatusCode)
 	}
 
-	badJSON = bytes.NewBuffer([]byte(`{invalid-json`))
-	// req, _ := http.NewRequest(http.MethodGet, ts.URL+"/game/current", badJSON)
-
 	resp, _ = http.Get(ts.URL + "/game/current/123123r53ot")
-	// resp, _ = http.DefaultClient.Do(req)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("Expected 404 Not Found on invalid path value in GetCurrentGame, got %d", resp.StatusCode)
 	}
@@ -618,21 +569,25 @@ func TestGetFinishedGamesHandler(t *testing.T) {
 	auth := &MockAuthenticator{}
 
 	now := time.Now().Truncate(time.Millisecond)
-	repo.Save(ctx, &domain.Session{
+	if err := repo.Save(ctx, &domain.Session{
 		UUID:        "finished-1",
 		Player1UUID: "test-user-uuid",
 		Player2UUID: "other-user",
 		Status:      domain.Win,
 		WinnerUUID:  "test-user-uuid",
 		CreatedAt:   now,
-	})
-	repo.Save(ctx, &domain.Session{
+	}); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
+	if err := repo.Save(ctx, &domain.Session{
 		UUID:        "active-1",
 		Player1UUID: "test-user-uuid",
 		Player2UUID: "other-user",
 		Status:      domain.Waiting,
 		CreatedAt:   now,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /game/finished", auth.Middleware(http.HandlerFunc(handler.GetFinishedGames)))
@@ -646,7 +601,9 @@ func TestGetFinishedGamesHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
@@ -713,7 +670,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
@@ -740,7 +699,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
@@ -764,7 +725,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
@@ -780,7 +743,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
@@ -796,7 +761,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("Expected 400 Bad Request, got %d", resp.StatusCode)
@@ -809,7 +776,9 @@ func TestGetLeaderboardHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("Expected 400 Bad Request, got %d", resp.StatusCode)

@@ -93,7 +93,11 @@ func (u *UserHandler) UpdateAccessToken(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jwtResp)
+	if err := json.NewEncoder(w).Encode(jwtResp); err != nil {
+		log.Printf("Failed to encode jwt response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (u *UserHandler) UpdateRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +130,11 @@ func (u *UserHandler) UpdateRefreshToken(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jwtResp)
+	if err := json.NewEncoder(w).Encode(jwtResp); err != nil {
+		log.Printf("Failed to encode jwt response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +164,11 @@ func (u *UserHandler) AuthUser(w http.ResponseWriter, r *http.Request) {
 	log.Printf("User authorized successfully")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jwtResp)
+	if err := json.NewEncoder(w).Encode(jwtResp); err != nil {
+		log.Printf("Failed to encode jwt response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (u *UserHandler) GetUserByToken(w http.ResponseWriter, r *http.Request) {
@@ -175,10 +187,14 @@ func (u *UserHandler) GetUserByToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(UserResponse{
+	if err := json.NewEncoder(w).Encode(UserResponse{
 		UUID:  user.UUID,
 		Login: user.Login,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode user response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -198,10 +214,14 @@ func (u *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(UserResponse{
+	if err := json.NewEncoder(w).Encode(UserResponse{
 		UUID:  user.UUID,
 		Login: user.Login,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode user response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (a *UserAuthenticator) Middleware(h http.Handler) http.Handler {

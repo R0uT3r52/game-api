@@ -66,11 +66,12 @@ func (g *GameService) MakeMove(ctx context.Context, gameUUID, playerUUID string,
 	}
 
 	var playerSign int
-	if playerUUID == s.Player1UUID {
+	switch playerUUID {
+	case s.Player1UUID:
 		playerSign = s.Player1Sign
-	} else if playerUUID == s.Player2UUID {
+	case s.Player2UUID:
 		playerSign = s.Player2Sign
-	} else {
+	default:
 		return nil, &ValidationError{Message: "you are not a player in this game"}
 	}
 
@@ -140,14 +141,15 @@ func (g *GameService) validateGridChange(oldField, newField Field, expectedSign 
 }
 
 func (g *GameService) applyEndState(s *Session, winner int) {
-	if winner == Tie {
+	switch winner {
+	case Tie:
 		s.Status = Draw
 		s.CurrentTurnUUID = ""
-	} else if winner == Player {
+	case Player:
 		s.Status = Win
 		s.WinnerUUID = s.Player1UUID
 		s.CurrentTurnUUID = ""
-	} else if winner == Bot {
+	case Bot:
 		s.Status = Win
 		if s.IsWithBot {
 			// "bot" will cause DB error because of types in PostgreSQL
@@ -339,9 +341,10 @@ func (g *GameService) getNextMove(f *Field) (row, col int) {
 func (g *GameService) evaluate(f *Field) int {
 	for row := range f.Grid {
 		if f.Grid[row][0] == f.Grid[row][1] && f.Grid[row][1] == f.Grid[row][2] {
-			if f.Grid[row][0] == g.PlayerSign {
+			switch f.Grid[row][0] {
+			case g.PlayerSign:
 				return -10
-			} else if f.Grid[row][0] == g.BotSign {
+			case g.BotSign:
 				return 10
 			}
 		}
@@ -349,26 +352,29 @@ func (g *GameService) evaluate(f *Field) int {
 
 	for col := range f.Grid {
 		if f.Grid[0][col] == f.Grid[1][col] && f.Grid[1][col] == f.Grid[2][col] {
-			if f.Grid[0][col] == g.PlayerSign {
+			switch f.Grid[0][col] {
+			case g.PlayerSign:
 				return -10
-			} else if f.Grid[0][col] == g.BotSign {
+			case g.BotSign:
 				return 10
 			}
 		}
 	}
 
 	if f.Grid[0][0] == f.Grid[1][1] && f.Grid[1][1] == f.Grid[2][2] {
-		if f.Grid[0][0] == g.PlayerSign {
+		switch f.Grid[0][0] {
+		case g.PlayerSign:
 			return -10
-		} else if f.Grid[0][0] == g.BotSign {
+		case g.BotSign:
 			return 10
 		}
 	}
 
 	if f.Grid[0][2] == f.Grid[1][1] && f.Grid[1][1] == f.Grid[2][0] {
-		if f.Grid[0][2] == g.PlayerSign {
+		switch f.Grid[0][2] {
+		case g.PlayerSign:
 			return -10
-		} else if f.Grid[0][2] == g.BotSign {
+		case g.BotSign:
 			return 10
 		}
 	}

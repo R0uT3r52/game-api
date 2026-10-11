@@ -241,7 +241,7 @@ func (jwtp *JwtProvider) ValidateRefreshToken(token string) error {
 }
 
 func (jwtp *JwtProvider) GetUUIDFromToken(token string) (string, error) {
-	var uuid string = ""
+	var uuid string
 
 	tkn, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != "HS256" {

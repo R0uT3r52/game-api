@@ -35,7 +35,9 @@ func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(TokenResponse{UUID: uuid})
+	if err := json.NewEncoder(w).Encode(TokenResponse{UUID: uuid}); err != nil {
+		log.Printf("Failed to encode create game response: %v", err)
+	}
 }
 
 func (h *GameHandler) ListGames(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +92,9 @@ func (h *GameHandler) GetCurrentGame(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(webModels)
+	if err := json.NewEncoder(w).Encode(webModels); err != nil {
+		log.Printf("Failed to encode current game response: %v", err)
+	}
 }
 
 func (h *GameHandler) GetFinishedGames(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +123,9 @@ func (h *GameHandler) GetFinishedGames(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(ans)
+	if err := json.NewEncoder(w).Encode(ans); err != nil {
+		log.Printf("Failed to encode finished games response: %v", err)
+	}
 }
 
 func (h *GameHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +171,9 @@ func (h *GameHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(ans)
+	if err := json.NewEncoder(w).Encode(ans); err != nil {
+		log.Printf("Failed to encode leaderboard response: %v", err)
+	}
 }
 
 func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
@@ -198,14 +206,18 @@ func (h *GameHandler) ConnectGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode("connected successfully")
+	if err := json.NewEncoder(w).Encode("connected successfully"); err != nil {
+		log.Printf("Failed to encode connect response: %v", err)
+	}
 }
 
 func (h *GameHandler) SendResponse(w http.ResponseWriter, session *domain.Session) {
 	w.Header().Set("Content-Type", "application/json")
 	var webModel GameModel
 	webModel.DomainToWeb(session)
-	json.NewEncoder(w).Encode(webModel)
+	if err := json.NewEncoder(w).Encode(webModel); err != nil {
+		log.Printf("Failed to encode game response: %v", err)
+	}
 }
 
 func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +239,9 @@ func (h *GameHandler) PostGame(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Move validation failed [uuid: %s]: %v", gameUUID, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(ErrorResponse{Message: valErr.Message})
+			if err := json.NewEncoder(w).Encode(ErrorResponse{Message: valErr.Message}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+			}
 			return
 		}
 

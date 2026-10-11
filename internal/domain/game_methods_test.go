@@ -239,16 +239,6 @@ func TestValidateField(t *testing.T) {
 				t.Errorf("ValidateField() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantErr && err != nil {
-				// Check if error message contains expected string
-				var vErr *ValidationError
-				if errors.As(err, &vErr) {
-					// We can check message if we want, but some might be different
-					// t.Logf("Got expected validation error: %v", vErr.Message)
-				} else {
-					// t.Errorf("Expected ValidationError, got %T", err)
-				}
-			}
 		})
 	}
 }
@@ -472,7 +462,9 @@ func TestMakeMove(t *testing.T) {
 		{Nought, Nought, Empty},
 		{Empty, Empty, Empty},
 	}
-	winningRepo.Save(ctx, session)
+	if err := winningRepo.Save(ctx, session); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
 
 	winMove := Field{Grid: [3][3]int{
 		{Cross, Cross, Cross},
@@ -561,7 +553,9 @@ func TestPvPGameEndAndTie(t *testing.T) {
 		{Empty, Empty, Empty},
 	}
 	pSession.CurrentTurnUUID = "p2"
-	pvpRepo.Save(ctx, pSession)
+	if err := pvpRepo.Save(ctx, pSession); err != nil {
+		t.Fatalf("Failed to save pvp session: %v", err)
+	}
 
 	p2WinMove := Field{Grid: [3][3]int{
 		{Nought, Nought, Nought},
@@ -585,7 +579,9 @@ func TestPvPGameEndAndTie(t *testing.T) {
 		{Nought, Cross, Empty},
 	}
 	tSession.CurrentTurnUUID = "p1"
-	tieRepo.Save(ctx, tSession)
+	if err := tieRepo.Save(ctx, tSession); err != nil {
+		t.Fatalf("Failed to save tie session: %v", err)
+	}
 
 	tieMove := Field{Grid: [3][3]int{
 		{Cross, Nought, Cross},
@@ -611,7 +607,9 @@ func TestMakeAiMoveBotWin(t *testing.T) {
 		{Cross, Cross, Empty},
 		{Empty, Empty, Empty},
 	}
-	repo.Save(ctx, s)
+	if err := repo.Save(ctx, s); err != nil {
+		t.Fatalf("Failed to save session: %v", err)
+	}
 
 	res, err := service.MakeAiMove(ctx, gameID)
 	if err != nil || res.Status != Win || res.WinnerUUID != "" {
