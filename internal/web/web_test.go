@@ -15,8 +15,11 @@ import (
 )
 
 type MockRepo struct {
-	Data    sync.Map
-	Latency time.Duration // DB latency imitation
+	Data                 sync.Map
+	Latency              time.Duration // DB latency imitation
+	Leaderboard          []domain.LeaderBoard
+	LeaderboardErr       error
+	LastLeaderboardLimit int64
 }
 
 type notFoundError struct{}
@@ -87,7 +90,17 @@ func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID str
 }
 
 func (m *MockRepo) GetLeaderboard(ctx context.Context, limit int64) ([]domain.LeaderBoard, error) {
-	return nil, nil
+	m.LastLeaderboardLimit = limit
+	if m.LeaderboardErr != nil {
+		return nil, m.LeaderboardErr
+	}
+	if m.Leaderboard != nil {
+		if int64(len(m.Leaderboard)) < limit {
+			return m.Leaderboard, nil
+		}
+		return m.Leaderboard[:limit], nil
+	}
+	return []domain.LeaderBoard{}, nil
 }
 
 func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]domain.Session, error) {
@@ -553,6 +566,7 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 	mux.Handle("GET /game/current/{uuid}", auth.Middleware(http.HandlerFunc(handler.GetCurrentGame)))
 	mux.Handle("POST /game/{uuid}", auth.Middleware(http.HandlerFunc(handler.PostGame)))
 	mux.Handle("GET /game/finished", auth.Middleware(http.HandlerFunc(handler.GetFinishedGames)))
+	mux.Handle("GET /leaderboard", auth.Middleware(http.HandlerFunc(handler.GetLeaderboard)))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
@@ -589,6 +603,10 @@ func TestGameHandlerServiceErrors(t *testing.T) {
 	resp, _ = http.Get(ts.URL + "/game/finished")
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("Expected 500 for GetFinishedGames error, got %d", resp.StatusCode)
+	}
+	resp, _ = http.Get(ts.URL + "/leaderboard")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 for GetLeaderboard error, got %d", resp.StatusCode)
 	}
 }
 
@@ -656,4 +674,179 @@ func TestGetFinishedGamesHandler(t *testing.T) {
 		t.Errorf("Expected 401 Unauthorized for empty context user, got %d", rec.Code)
 	}
 
+}
+
+func TestLeaderBoardModelMapping(t *testing.T) {
+	domainLB := &domain.LeaderBoard{
+		PlayerUUID:  "p1-uuid",
+		PlayerLogin: "alice",
+		WinRate:     0.85,
+	}
+	var webLB LeaderBoardModel
+	webLB.DomainToWeb(domainLB)
+
+	if webLB.PlayerUUID != domainLB.PlayerUUID || webLB.PlayerLogin != domainLB.PlayerLogin || webLB.WinRate != domainLB.WinRate {
+		t.Errorf("DomainToWeb failed: got %+v, want %+v", webLB, domainLB)
+	}
+}
+
+func TestGetLeaderboardHandler(t *testing.T) {
+	repo := &MockRepo{
+		Leaderboard: []domain.LeaderBoard{
+			{PlayerUUID: "u1", PlayerLogin: "player1", WinRate: 0.95},
+			{PlayerUUID: "u2", PlayerLogin: "player2", WinRate: 0.60},
+			{PlayerUUID: "u3", PlayerLogin: "player3", WinRate: 0.33},
+		},
+	}
+	svc := domain.NewGameService(repo, domain.Cross, domain.Nought)
+	handler := NewGameHandler(svc)
+	auth := &MockAuthenticator{}
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /leaderboard", auth.Middleware(http.HandlerFunc(handler.GetLeaderboard)))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 1. Default limit 50
+	t.Run("default limit", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+		}
+		if repo.LastLeaderboardLimit != 50 {
+			t.Errorf("Expected limit 50, got %d", repo.LastLeaderboardLimit)
+		}
+
+		var items []LeaderBoardModel
+		if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		if len(items) != 3 {
+			t.Fatalf("Expected 3 items, got %d", len(items))
+		}
+		if items[0].PlayerUUID != "u1" || items[0].PlayerLogin != "player1" || items[0].WinRate != 0.95 {
+			t.Errorf("Unexpected first item: %+v", items[0])
+		}
+	})
+
+	// 2. Custom limit with ?limit=
+	t.Run("limit parameter", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard?limit=2")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+		}
+		if repo.LastLeaderboardLimit != 2 {
+			t.Errorf("Expected limit 2, got %d", repo.LastLeaderboardLimit)
+		}
+
+		var items []LeaderBoardModel
+		if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(items))
+		}
+	})
+
+	// 3. Fallback parameter ?n=
+	t.Run("n parameter fallback", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard?n=1")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+		}
+		if repo.LastLeaderboardLimit != 1 {
+			t.Errorf("Expected limit 1, got %d", repo.LastLeaderboardLimit)
+		}
+	})
+
+	// 4. Fallback parameter ?N=
+	t.Run("N parameter fallback", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard?N=1")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+		}
+		if repo.LastLeaderboardLimit != 1 {
+			t.Errorf("Expected limit 1, got %d", repo.LastLeaderboardLimit)
+		}
+	})
+
+	// 5. Invalid query parameter format = 400 Bad Request
+	t.Run("invalid query parameter string", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard?limit=abc")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("Expected 400 Bad Request, got %d", resp.StatusCode)
+		}
+	})
+
+	// 6. Negative limit = 400 Bad Request
+	t.Run("negative limit parameter", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/leaderboard?limit=-1")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("Expected 400 Bad Request, got %d", resp.StatusCode)
+		}
+	})
+
+	// 7. Empty leaderboard returns 200 OK with empty slice []
+	t.Run("empty leaderboard", func(t *testing.T) {
+		emptyRepo := &MockRepo{Leaderboard: []domain.LeaderBoard{}}
+		emptySvc := domain.NewGameService(emptyRepo, domain.Cross, domain.Nought)
+		emptyHandler := NewGameHandler(emptySvc)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/leaderboard", nil)
+		emptyHandler.GetLeaderboard(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d", rec.Code)
+		}
+		body := rec.Body.String()
+		if body != "[]\n" {
+			t.Errorf("Expected empty JSON array '[]\\n', got %q", body)
+		}
+	})
+
+	// 8. Service internal error = 500
+	t.Run("service internal error", func(t *testing.T) {
+		errRepo := &MockRepo{LeaderboardErr: errors.New("db error")}
+		errSvc := domain.NewGameService(errRepo, domain.Cross, domain.Nought)
+		errHandler := NewGameHandler(errSvc)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/leaderboard", nil)
+		errHandler.GetLeaderboard(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("Expected 500 Internal Server Error, got %d", rec.Code)
+		}
+	})
 }

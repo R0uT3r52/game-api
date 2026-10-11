@@ -8,10 +8,13 @@ import (
 )
 
 type MockRepo struct {
-	sessions map[string]*Session
-	saveErr  error
-	loadErr  error
-	listErr  error
+	sessions        map[string]*Session
+	saveErr         error
+	loadErr         error
+	listErr         error
+	leaderboardErr  error
+	leaderboardData []LeaderBoard
+	lastLimit       int64
 }
 
 func (m *MockRepo) Save(ctx context.Context, s *Session) error {
@@ -78,6 +81,19 @@ func (m *MockRepo) GetFinishedGames(ctx context.Context, playerUUID string) ([]S
 }
 
 func (m *MockRepo) GetLeaderboard(ctx context.Context, limit int64) ([]LeaderBoard, error) {
+	m.lastLimit = limit
+	if m.leaderboardErr != nil {
+		return nil, m.leaderboardErr
+	}
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	if m.leaderboardData != nil {
+		if int64(len(m.leaderboardData)) < limit {
+			return m.leaderboardData, nil
+		}
+		return m.leaderboardData[:limit], nil
+	}
 	return nil, nil
 }
 
@@ -645,6 +661,11 @@ func TestGameServiceErrorBranches(t *testing.T) {
 	if err == nil {
 		t.Error("Expected GetFinishedGames to fail on repo GetFinishedGames error")
 	}
+
+	_, err = listErrService.GetLeaderboard(ctx, 10)
+	if err == nil {
+		t.Error("Expected GetLeaderboard to fail on repo GetLeaderboard error")
+	}
 }
 
 func TestGetFinishedGames(t *testing.T) {
@@ -675,6 +696,54 @@ func TestGetFinishedGames(t *testing.T) {
 	}
 }
 
+func TestGetLeaderboard(t *testing.T) {
+	ctx := context.Background()
+	mockData := []LeaderBoard{
+		{PlayerUUID: "p1", PlayerLogin: "alice", WinRate: 0.8},
+		{PlayerUUID: "p2", PlayerLogin: "bob", WinRate: 0.5},
+	}
+	repo := &MockRepo{
+		sessions:        make(map[string]*Session),
+		leaderboardData: mockData,
+	}
+	svc := NewGameService(repo, Cross, Nought)
+
+	// 1. Success with valid limit
+	lb, err := svc.GetLeaderboard(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetLeaderboard failed: %v", err)
+	}
+	if len(lb) != 2 {
+		t.Fatalf("Expected 2 leaderboard entries, got %d", len(lb))
+	}
+	if repo.lastLimit != 10 {
+		t.Errorf("Expected limit 10 passed to repo, got %d", repo.lastLimit)
+	}
+	if lb[0].PlayerLogin != "alice" || lb[0].WinRate != 0.8 {
+		t.Errorf("Unexpected leaderboard item: %+v", lb[0])
+	}
+
+	// 2. Negative limit returns ErrIncorrectLimit
+	_, err = svc.GetLeaderboard(ctx, -1)
+	if err == nil {
+		t.Error("Expected error when limit < 0")
+	}
+	if !errors.Is(err, ErrIncorrectLimit) {
+		t.Errorf("Expected ErrIncorrectLimit, got %v", err)
+	}
+
+	// 3. Repo error
+	errRepo := &MockRepo{
+		sessions:       make(map[string]*Session),
+		leaderboardErr: errors.New("db error"),
+	}
+	errSvc := NewGameService(errRepo, Cross, Nought)
+	_, err = errSvc.GetLeaderboard(ctx, 10)
+	if err == nil {
+		t.Error("Expected error when repo returns error")
+	}
+}
+
 func TestDomainErrors(t *testing.T) {
 	vErr := &ValidationError{Message: "test validation"}
 	if vErr.Error() == "" {
@@ -694,5 +763,9 @@ func TestDomainErrors(t *testing.T) {
 	uaErr := &UserAlreadyExistsError{Login: "user"}
 	if uaErr.Error() == "" {
 		t.Error("UserAlreadyExistsError string is empty")
+	}
+
+	if ErrIncorrectLimit.Error() == "" {
+		t.Error("ErrIncorrectLimit string is empty")
 	}
 }

@@ -55,4 +55,15 @@ func TestDatasourceMappers(t *testing.T) {
 	if userDomain.UUID != user.UUID || userDomain.Login != user.Login {
 		t.Errorf("UserToDomain failed: %+v", userDomain)
 	}
+
+	// Leaderboard Mapper
+	lbModel := LeaderBoardModel{
+		PlayerUUID:  "user-uuid",
+		PlayerLogin: "alice",
+		WinRate:     0.75,
+	}
+	lbDomain := LeaderboardToDomain(&lbModel)
+	if lbDomain.PlayerUUID != lbModel.PlayerUUID || lbDomain.PlayerLogin != lbModel.PlayerLogin || lbDomain.WinRate != lbModel.WinRate {
+		t.Errorf("LeaderboardToDomain failed: %+v", lbDomain)
+	}
 }
