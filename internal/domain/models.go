@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"sync"
 	"time"
 )
 
@@ -59,7 +58,6 @@ type GameService struct {
 	repo       GameRepositoryInterface
 	PlayerSign int
 	BotSign    int
-	mu         sync.Mutex
 }
 
 type SignUpRequest struct {

@@ -15,6 +15,7 @@ type MockRepo struct {
 	leaderboardErr  error
 	leaderboardData []LeaderBoard
 	lastLimit       int64
+	txErr           error
 }
 
 func (m *MockRepo) Save(ctx context.Context, s *Session) error {
@@ -31,11 +32,22 @@ func (m *MockRepo) Load(ctx context.Context, uuid string) (*Session, error) {
 	}
 	s, ok := m.sessions[uuid]
 	if !ok {
-		return nil, errors.New("not found")
+		return nil, &GameNotFoundError{UUID: uuid}
 	}
 	// Return a copy to avoid side effects during validation
 	sCopy := *s
 	return &sCopy, nil
+}
+
+func (m *MockRepo) LoadForUpdate(ctx context.Context, uuid string) (*Session, error) {
+	return m.Load(ctx, uuid)
+}
+
+func (m *MockRepo) WithTx(ctx context.Context, fn func(txRepo GameRepositoryInterface) error) error {
+	if m.txErr != nil {
+		return m.txErr
+	}
+	return fn(m)
 }
 
 func (m *MockRepo) ListAvailable(ctx context.Context) ([]Session, error) {
@@ -49,6 +61,23 @@ func (m *MockRepo) ListAvailable(ctx context.Context) ([]Session, error) {
 		}
 	}
 	return ans, nil
+}
+
+func (m *MockRepo) ConnectPlayer(ctx context.Context, gameUUID, player2UUID string) error {
+	s, ok := m.sessions[gameUUID]
+	if !ok {
+		return &GameNotFoundError{UUID: gameUUID}
+	}
+	if s.Status != Waiting {
+		return ErrGameAlreadyStarted
+	}
+	if s.Player1UUID == player2UUID {
+		return ErrUserAlreadyInGame
+	}
+	s.Player2UUID = player2UUID
+	s.Status = Turn
+	s.Player2Sign = Nought
+	return nil
 }
 
 func (m *MockRepo) GetCurrentGames(ctx context.Context, gameUUID, playerUUID string) ([]Session, error) {
@@ -244,7 +273,6 @@ func TestValidateField(t *testing.T) {
 }
 
 func TestCheckGameEnd(t *testing.T) {
-	ctx := context.Background()
 	repo := &MockRepo{sessions: make(map[string]*Session)}
 	service := NewGameService(repo, Cross, Nought)
 	uuid := "test-uuid"
@@ -299,12 +327,9 @@ func TestCheckGameEnd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo.sessions[uuid] = &Session{UUID: uuid, F: tt.field}
-			ended, winner, err := service.CheckGameEnd(ctx, uuid)
-			if err != nil {
-				t.Errorf("CheckGameEnd() error = %v", err)
-				return
-			}
+			s := &Session{UUID: uuid, F: tt.field}
+			repo.sessions[uuid] = s
+			ended, winner := service.CheckGameEnd(s)
 			if ended != tt.wantEnded {
 				t.Errorf("CheckGameEnd() ended = %v, want %v", ended, tt.wantEnded)
 			}
@@ -635,6 +660,32 @@ func TestGameServiceErrorBranches(t *testing.T) {
 	_, err = loadErrService.MakeMove(ctx, "id", "p1", Field{})
 	if err == nil {
 		t.Error("Expected MakeMove to fail on repo Load error")
+	}
+
+	// Repo Save error during MakeMove
+	saveErrRepo := &MockRepo{sessions: map[string]*Session{
+		"id": {
+			UUID:            "id",
+			Status:          Turn,
+			CurrentTurnUUID: "p1",
+			Player1UUID:     "p1",
+			Player2UUID:     "p2",
+			Player1Sign:     Cross,
+			Player2Sign:     Nought,
+		},
+	}, saveErr: errors.New("db save error")}
+	saveErrService := NewGameService(saveErrRepo, Cross, Nought)
+	_, err = saveErrService.MakeMove(ctx, "id", "p1", Field{Grid: [3][3]int{{Cross, Empty, Empty}}})
+	if err == nil {
+		t.Error("Expected MakeMove to fail on repo Save error")
+	}
+
+	// Tx error during MakeMove
+	txErrRepo := &MockRepo{sessions: make(map[string]*Session), txErr: errors.New("db tx error")}
+	txErrService := NewGameService(txErrRepo, Cross, Nought)
+	_, err = txErrService.MakeMove(ctx, "id", "p1", Field{})
+	if err == nil {
+		t.Error("Expected MakeMove to fail on tx error")
 	}
 
 	err = loadErrService.Connect(ctx, "p2", "id")

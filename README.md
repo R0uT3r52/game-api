@@ -368,10 +368,16 @@ Returns top players sorted by winrate (`wins / (losses + draws)`).
 
 ## Testing & Quality
 
-Run unit and integration tests with race detector:
+Run unit and integration tests with race detector (requires Docker):
 
 ```bash
 go test -v -race ./...
+```
+
+Run only unit tests without Postgres integration:
+
+```bash
+go test -v -race -short ./...
 ```
 
 Run linter and formatting checks:

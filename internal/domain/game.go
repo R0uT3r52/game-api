@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
@@ -50,72 +51,71 @@ func (g *GameService) CreateGame(ctx context.Context, p1 string, withBot bool) (
 }
 
 func (g *GameService) MakeMove(ctx context.Context, gameUUID, playerUUID string, newField Field) (*Session, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	s, err := g.repo.Load(ctx, gameUUID)
-	if err != nil {
-		return nil, err
-	}
 
-	if s.Status != Turn {
-		return nil, &ValidationError{Message: "game is not in turn state"}
-	}
+	var updatedSession *Session
 
-	if s.CurrentTurnUUID != playerUUID {
-		return nil, &ValidationError{Message: "it is not your turn"}
-	}
-
-	var playerSign int
-	switch playerUUID {
-	case s.Player1UUID:
-		playerSign = s.Player1Sign
-	case s.Player2UUID:
-		playerSign = s.Player2Sign
-	default:
-		return nil, &ValidationError{Message: "you are not a player in this game"}
-	}
-
-	if err := g.validateGridChange(s.F, newField, playerSign); err != nil {
-		return nil, err
-	}
-
-	s.F = newField
-
-	err = g.repo.Save(ctx, s)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for end after move
-	ended, winner, _ := g.CheckGameEnd(ctx, s.UUID)
-	if ended {
-		g.applyEndState(s, winner)
-		err = g.repo.Save(ctx, s)
-		return s, err
-	}
-
-	// Switch turn
-	if !s.IsWithBot {
-		if s.CurrentTurnUUID == s.Player1UUID {
-			s.CurrentTurnUUID = s.Player2UUID
-		} else {
-			s.CurrentTurnUUID = s.Player1UUID
-		}
-	} else {
-		// If with bot, player move is done, save it, then call AI move
-		err = g.repo.Save(ctx, s)
+	err := g.repo.WithTx(ctx, func(txRepo GameRepositoryInterface) error {
+		s, err := txRepo.LoadForUpdate(ctx, gameUUID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return g.MakeAiMove(ctx, s.UUID)
-	}
 
-	err = g.repo.Save(ctx, s)
+		if s.Status != Turn {
+			return &ValidationError{Message: "game is not in turn state"}
+		}
+
+		if s.CurrentTurnUUID != playerUUID {
+			return &ValidationError{Message: "it is not your turn"}
+		}
+
+		var playerSign int
+		switch playerUUID {
+		case s.Player1UUID:
+			playerSign = s.Player1Sign
+		case s.Player2UUID:
+			playerSign = s.Player2Sign
+		default:
+			return &ValidationError{Message: "you are not a player in this game"}
+		}
+
+		if err := g.validateGridChange(s.F, newField, playerSign); err != nil {
+			return err
+		}
+
+		s.F = newField
+
+		// Check for end after move
+		ended, winner := g.CheckGameEnd(s)
+		if ended {
+			g.applyEndState(s, winner)
+		} else {
+			if !s.IsWithBot {
+				if s.CurrentTurnUUID == s.Player1UUID {
+					s.CurrentTurnUUID = s.Player2UUID
+				} else {
+					s.CurrentTurnUUID = s.Player1UUID
+				}
+			} else {
+				// If with bot, player move is done, save it, then call AI move
+				if err := g.applyBotMove(s); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := txRepo.Save(ctx, s); err != nil {
+			return err
+		}
+
+		updatedSession = s
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	return s, nil
+	return updatedSession, nil
 }
 
 func (g *GameService) validateGridChange(oldField, newField Field, expectedSign int) error {
@@ -208,33 +208,8 @@ func (g *GameService) GetFinishedGames(ctx context.Context, playerUUID string) (
 }
 
 func (g *GameService) Connect(ctx context.Context, p2UUID, gameUUID string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
 
-	s, err := g.repo.Load(ctx, gameUUID)
-	if err != nil {
-		return err
-	}
-
-	if s.Status != Waiting {
-		return ErrGameAlreadyStarted
-	}
-
-	if p2UUID == s.Player1UUID {
-		return ErrUserAlreadyInGame
-	}
-
-	s.Status = Turn
-	s.CurrentTurnUUID = s.Player1UUID
-	s.Player2Sign = Nought
-	s.Player2UUID = p2UUID
-
-	err = g.repo.Save(ctx, s)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return g.repo.ConnectPlayer(ctx, gameUUID, p2UUID)
 }
 
 func (g *GameService) ValidateField(ctx context.Context, uuid string, newField Field) error {
@@ -262,53 +237,63 @@ func (g *GameService) ValidateField(ctx context.Context, uuid string, newField F
 }
 
 func (g *GameService) MakeAiMove(ctx context.Context, uuid string) (*Session, error) {
-	s, err := g.repo.Load(ctx, uuid)
-	if err != nil {
-		return nil, &GameNotFoundError{UUID: uuid}
-	}
+	var updatedSession *Session
+	err := g.repo.WithTx(ctx, func(txRepo GameRepositoryInterface) error {
+		s, err := txRepo.LoadForUpdate(ctx, uuid)
+		if err != nil {
+			var notFound *GameNotFoundError
+			if errors.As(err, &notFound) {
+				return err
+			}
+			return &GameNotFoundError{UUID: uuid}
+		}
 
+		if err := g.applyBotMove(s); err != nil {
+			return err
+		}
+
+		if err := txRepo.Save(ctx, s); err != nil {
+			return err
+		}
+
+		updatedSession = s
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updatedSession, nil
+}
+
+func (g *GameService) applyBotMove(s *Session) error {
 	r, c := g.getNextMove(&s.F)
 	if r == -1 || c == -1 {
-		return nil, &ValidationError{Message: "error"}
+		return &ValidationError{Message: "error"}
 	}
 
 	s.F.Grid[r][c] = g.BotSign
 
-	err = g.repo.Save(ctx, s)
-	if err != nil {
-		return s, err
-	}
-
 	// Check for end after AI move
-	ended, winner, _ := g.CheckGameEnd(ctx, s.UUID)
+	ended, winner := g.CheckGameEnd(s)
 	if ended {
 		g.applyEndState(s, winner)
-		err = g.repo.Save(ctx, s)
-		if err != nil {
-			return s, err
-		}
 	}
 
-	return s, nil
+	return nil
 }
 
-func (g *GameService) CheckGameEnd(ctx context.Context, uuid string) (isEnded bool, winner int, err error) {
-	s, err := g.repo.Load(ctx, uuid)
-	if err != nil {
-		return false, -1, &GameNotFoundError{UUID: uuid}
-	}
-
+func (g *GameService) CheckGameEnd(s *Session) (isEnded bool, winner int) {
 	score := g.evaluate(&s.F)
 
 	if score == 10 {
-		return true, Bot, nil
+		return true, Bot
 	} else if score == -10 {
-		return true, Player, nil
+		return true, Player
 	} else if score == 0 && !isMovesLeft(&s.F) {
-		return true, Tie, nil
+		return true, Tie
 	}
 
-	return false, -1, nil
+	return false, -1
 }
 
 func (g *GameService) getNextMove(f *Field) (row, col int) {
