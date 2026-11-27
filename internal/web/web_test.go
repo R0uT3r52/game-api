@@ -15,6 +15,7 @@ import (
 )
 
 type MockRepo struct {
+	mu                   sync.Mutex
 	Data                 sync.Map
 	Latency              time.Duration // DB latency imitation
 	Leaderboard          []domain.LeaderBoard
@@ -30,6 +31,31 @@ func (m *MockRepo) Save(ctx context.Context, game *domain.Session) error {
 	return nil
 }
 
+func (m *MockRepo) ConnectPlayer(ctx context.Context, gameUUID, player2UUID string) error {
+	if m.Latency > 0 {
+		time.Sleep(m.Latency)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	val, ok := m.Data.Load(gameUUID)
+	if !ok {
+		return &domain.GameNotFoundError{UUID: gameUUID}
+	}
+	s := val.(domain.Session)
+	if s.Status != domain.Waiting {
+		return domain.ErrGameAlreadyStarted
+	}
+	if s.Player1UUID == player2UUID {
+		return domain.ErrUserAlreadyInGame
+	}
+	s.Player2UUID = player2UUID
+	s.Status = domain.Turn
+	s.Player2Sign = domain.Nought
+	m.Data.Store(gameUUID, s)
+	return nil
+}
+
 func (m *MockRepo) Load(ctx context.Context, uuid string) (*domain.Session, error) {
 	if m.Latency > 0 {
 		time.Sleep(m.Latency)
@@ -40,6 +66,16 @@ func (m *MockRepo) Load(ctx context.Context, uuid string) (*domain.Session, erro
 	}
 	s := session.(domain.Session)
 	return &s, nil
+}
+
+func (m *MockRepo) LoadForUpdate(ctx context.Context, uuid string) (*domain.Session, error) {
+	return m.Load(ctx, uuid)
+}
+
+func (m *MockRepo) WithTx(ctx context.Context, fn func(txRepo domain.GameRepositoryInterface) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return fn(m)
 }
 
 func (m *MockRepo) ListAvailable(ctx context.Context) ([]domain.Session, error) {
@@ -482,8 +518,8 @@ func (m *MockErrGameService) MakeMove(ctx context.Context, gameUUID, playerUUID 
 func (m *MockErrGameService) ValidateField(ctx context.Context, uuid string, newField domain.Field) error {
 	return errors.New("service err")
 }
-func (m *MockErrGameService) CheckGameEnd(ctx context.Context, uuid string) (bool, int, error) {
-	return false, 0, errors.New("service err")
+func (m *MockErrGameService) CheckGameEnd(s *domain.Session) (bool, int) {
+	return false, 0
 }
 func (m *MockErrGameService) CreateGame(ctx context.Context, p1 string, withBot bool) (string, error) {
 	return "", errors.New("service err")

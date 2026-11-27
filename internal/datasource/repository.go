@@ -38,7 +38,53 @@ func NewGameRepo(db *pgxpool.Pool) *GameRepository {
 		Data: &Storage{
 			Games: db,
 		},
+		dbtx: db,
 	}
+}
+
+func (r *GameRepository) conn() DBTX {
+	if r.dbtx != nil {
+		return r.dbtx
+	}
+	return r.Data.Games
+}
+
+func (r *GameRepository) WithTx(ctx context.Context, fn func(txRepo domain.GameRepositoryInterface) error) error {
+	tx, err := r.Data.Games.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	txRepo := &GameRepository{
+		Data: r.Data,
+		dbtx: tx,
+	}
+
+	if err := fn(txRepo); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *GameRepository) LoadForUpdate(ctx context.Context, uuid string) (*domain.Session, error) {
+	sql := `SELECT * FROM games WHERE uuid=$1 FOR UPDATE;`
+
+	rows, err := r.conn().Query(ctx, sql, uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	model, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[GameModel])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, &domain.GameNotFoundError{UUID: uuid}
+		}
+		return nil, err
+	}
+
+	return ToDomain(&model), nil
 }
 
 func (r *GameRepository) GetLeaderboard(ctx context.Context, limit int64) ([]domain.LeaderBoard, error) {
@@ -63,7 +109,7 @@ func (r *GameRepository) GetLeaderboard(ctx context.Context, limit int64) ([]dom
 		LIMIT $3;
 	`
 
-	rows, err := r.Data.Games.Query(ctx, sqlAll, domain.Win, domain.Draw, limit)
+	rows, err := r.conn().Query(ctx, sqlAll, domain.Win, domain.Draw, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +133,7 @@ func (r *GameRepository) ListAvailable(ctx context.Context) ([]domain.Session, e
 	ans := make([]domain.Session, 0)
 	sql := `SELECT * FROM games WHERE status=$1 AND is_with_bot is FALSE;`
 
-	rows, err := r.Data.Games.Query(ctx, sql, domain.Waiting)
+	rows, err := r.conn().Query(ctx, sql, domain.Waiting)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +156,7 @@ func (r *GameRepository) GetCurrentGames(ctx context.Context, gameUUID, playerUU
 		// ctx := context.Background()
 		ans := make([]domain.Session, 0)
 		sql := `SELECT * FROM games WHERE player1_uuid=$1 OR player2_uuid=$1;`
-		rows, err := r.Data.Games.Query(ctx, sql, playerUUID)
+		rows, err := r.conn().Query(ctx, sql, playerUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +186,7 @@ func (r *GameRepository) GetFinishedGames(ctx context.Context, playerUUID string
 
 	sql := `SELECT * FROM games WHERE (player1_uuid=$1 OR player2_uuid=$1) AND (status=$2 OR status=$3) ORDER BY created_at DESC;`
 
-	rows, err := r.Data.Games.Query(ctx, sql, playerUUID, domain.Draw, domain.Win)
+	rows, err := r.conn().Query(ctx, sql, playerUUID, domain.Draw, domain.Win)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +202,44 @@ func (r *GameRepository) GetFinishedGames(ctx context.Context, playerUUID string
 	}
 
 	return ans, nil
+}
+
+func (r *GameRepository) ConnectPlayer(ctx context.Context, gameUUID, player2UUID string) error {
+
+	sql := `
+		UPDATE games
+		SET
+			player2_uuid=$1,
+			status=$2,
+			player2_sign=$3
+		WHERE
+			uuid=$4 AND status=$5 AND player1_uuid != $1;
+	`
+
+	tag, err := r.conn().Exec(ctx, sql, player2UUID, domain.Turn, domain.Nought, gameUUID, domain.Waiting)
+	if err != nil {
+		return err
+	}
+
+	// Player connection successful
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+
+	model, err := r.Load(ctx, gameUUID)
+	if err != nil {
+		return err
+	}
+
+	if model.Status != domain.Waiting {
+		return domain.ErrGameAlreadyStarted
+	}
+
+	if model.Player1UUID == player2UUID {
+		return domain.ErrUserAlreadyInGame
+	}
+
+	return domain.ErrGameAlreadyStarted
 }
 
 func (r *GameRepository) Save(ctx context.Context, game *domain.Session) error {
@@ -176,7 +260,7 @@ func (r *GameRepository) Save(ctx context.Context, game *domain.Session) error {
 		player2_sign = EXCLUDED.player2_sign,
 		changed_at = EXCLUDED.changed_at`
 
-	_, err := r.Data.Games.Exec(ctx, sql,
+	_, err := r.conn().Exec(ctx, sql,
 		gameModel.UUID,
 		gameModel.Field,
 		gameModel.Player1UUID,
@@ -195,7 +279,7 @@ func (r *GameRepository) Load(ctx context.Context, uuid string) (*domain.Session
 
 	sql := `SELECT * FROM games WHERE uuid=$1`
 
-	rows, err := r.Data.Games.Query(ctx, sql, uuid)
+	rows, err := r.conn().Query(ctx, sql, uuid)
 	if err != nil {
 		return nil, err
 	}
